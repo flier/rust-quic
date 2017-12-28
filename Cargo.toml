@@ -1,0 +1,18 @@
+[package]
+name = "quic"
+version = "0.1.0"
+authors = ["Flier Lu <flier.lu@gmail.com>"]
+
+[dependencies]
+log = "0.4"
+failure = "0.1"
+failure_derive = "0.1"
+arrayref = "0.3"
+bytes = "0.4"
+byteorder = "1"
+bitflags = "1.0"
+nom = "3.2"
+
+[dev-dependencies]
+pretty_env_logger = "0.1"
+matches = "0.1"
