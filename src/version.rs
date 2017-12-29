@@ -1,9 +1,11 @@
 #![allow(non_snake_case, non_camel_case_types)]
 
-use std::mem;
 use std::str::FromStr;
 
+use failure::Error;
+
 use errors::QuicError;
+use tag::QuicTag;
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub enum QuicVersion {
@@ -25,27 +27,21 @@ pub enum QuicVersion {
     QUIC_VERSION_41 = 41,
 }
 
-pub type QuicTag = [u8; 4];
-
 impl From<QuicVersion> for QuicTag {
     fn from(version: QuicVersion) -> Self {
-        let mut tag: QuicTag = unsafe { mem::uninitialized() };
-
-        tag.copy_from_slice(match version {
+        QuicTag::new(match version {
             QuicVersion::QUIC_VERSION_35 => b"Q035",
             QuicVersion::QUIC_VERSION_37 => b"Q037",
             QuicVersion::QUIC_VERSION_38 => b"Q038",
             QuicVersion::QUIC_VERSION_39 => b"Q039",
             QuicVersion::QUIC_VERSION_40 => b"Q040",
             QuicVersion::QUIC_VERSION_41 => b"Q041",
-        });
-
-        tag
+        })
     }
 }
 
 impl FromStr for QuicVersion {
-    type Err = QuicError;
+    type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
@@ -55,13 +51,8 @@ impl FromStr for QuicVersion {
             "Q039" => Ok(QuicVersion::QUIC_VERSION_39),
             "Q040" => Ok(QuicVersion::QUIC_VERSION_40),
             "Q041" => Ok(QuicVersion::QUIC_VERSION_41),
-            _ => {
-                let mut tag: QuicTag = unsafe { mem::uninitialized() };
-
-                tag.copy_from_slice(s.as_bytes());
-
-                Err(QuicError::UnsupportedVersion(tag))
-            }
+            _ if s.len() >= 4 => bail!(QuicError::UnsupportedVersion(QuicTag::new(s.as_bytes()))),
+            _ => bail!("incomplete QUIC tag, {}", s),
         }
     }
 }

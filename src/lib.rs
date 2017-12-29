@@ -20,9 +20,11 @@ extern crate matches;
 extern crate pretty_env_logger;
 
 mod errors;
+mod tag;
 mod version;
 mod frames;
+mod crypto;
 mod packet;
 mod framer;
 
-pub use framer::{FramerVisitor, Perspective, QuicFramer};
+pub use framer::{Perspective, QuicFramer, QuicFramerVisitor};

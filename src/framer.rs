@@ -1,18 +1,18 @@
 use std::time::Instant;
 
-use failure::{Error, Fail, ResultExt};
 use byteorder::{ByteOrder, NativeEndian, NetworkEndian};
+use failure::{Error, Fail, ResultExt};
 use nom::IResult;
 
 use errors::QuicError;
-use version::QuicVersion;
 use packet::{quic_version, EncryptedPacket, PublicHeader, QuicVersionNegotiationPacket, ToEndianness};
+use version::QuicVersion;
 
 pub trait Perspective {
     fn is_server() -> bool;
 }
 
-pub trait FramerVisitor {
+pub trait QuicFramerVisitor {
     /// Called when a new packet has been received, before it has been validated or processed.
     fn on_packet(&self);
 
@@ -56,7 +56,7 @@ impl<'a, V> QuicFramer<'a, V> {
 
 impl<'a, V> QuicFramer<'a, V>
 where
-    V: FramerVisitor,
+    V: QuicFramerVisitor,
 {
     pub fn process_packet<P>(&self, packet: &EncryptedPacket) -> Result<(), Error>
     where
