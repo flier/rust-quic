@@ -36,10 +36,10 @@ impl FromStr for QuicTag {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.len() < 4 {
-            bail!("incomplete tag")
-        } else {
-            Ok(QuicTag(LittleEndian::read_u32(s.as_bytes())))
+            bail!("incomplete tag, {}", s)
         }
+
+        Ok(QuicTag(LittleEndian::read_u32(s.as_bytes())))
     }
 }
 
@@ -63,6 +63,6 @@ mod tests {
         assert_eq!(u32::from(exmp), 0x504d5845);
         assert_eq!(exmp, 0x504d5845.into());
 
-        assert_eq!("EXMP".parse().unwrap(), exmp);
+        assert_eq!("EXMP".parse::<QuicTag>().unwrap(), exmp);
     }
 }
