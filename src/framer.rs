@@ -1,8 +1,7 @@
 use std::time::Instant;
 
 use byteorder::{ByteOrder, NativeEndian, NetworkEndian};
-use failure::{Error, Fail, ResultExt};
-use nom::IResult;
+use failure::{Error, ResultExt};
 
 use errors::QuicError;
 use packet::{quic_version, EncryptedPacket, PublicHeader, QuicVersionNegotiationPacket, ToEndianness};
@@ -79,13 +78,7 @@ where
         self.visitor.on_packet();
 
         // First parse the public header.
-        let (remaining, public_header) = match PublicHeader::parse::<E>(packet, P::is_server()) {
-            IResult::Done(remaining, public_header) => (remaining, public_header),
-            IResult::Incomplete(needed) => {
-                bail!(QuicError::IncompletePacket(needed).context("incomplete public header."))
-            }
-            IResult::Error(err) => bail!(QuicError::InvalidPacket(err).context("Unable to process public header.")),
-        };
+        let (remaining, public_header) = PublicHeader::parse::<E>(packet, P::is_server())?;
 
         if public_header.reset_flag && public_header.versions.is_some() {
             bail!("Got version flag in reset packet");

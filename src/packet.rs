@@ -3,10 +3,12 @@
 use std::ops::Deref;
 use std::str::FromStr;
 
-use bytes::Bytes;
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
+use bytes::Bytes;
+use failure::{Error, Fail};
 use nom::{Endianness, IResult, Needed, be_u64, be_u8};
 
+use errors::QuicError;
 use version::QuicVersion;
 
 const PACKET_FLAGS_1BYTE_PACKET: u8 = 0; // 00
@@ -72,11 +74,17 @@ pub struct PublicHeader<'a> {
 }
 
 impl<'a> PublicHeader<'a> {
-    pub fn parse<E>(buf: &[u8], is_server: bool) -> IResult<&[u8], PublicHeader>
+    pub fn parse<E>(buf: &[u8], is_server: bool) -> Result<(&[u8], PublicHeader), Error>
     where
         E: ByteOrder + ToEndianness,
     {
-        parse_public_header(buf, E::endianness(), is_server)
+        match parse_public_header(buf, E::endianness(), is_server) {
+            IResult::Done(remaining, public_header) => Ok((remaining, public_header)),
+            IResult::Incomplete(needed) => {
+                bail!(QuicError::IncompletePacket(needed).context("incomplete public header."))
+            }
+            IResult::Error(err) => bail!(QuicError::InvalidPacket(err).context("unable to process public header.")),
+        }
     }
 }
 
