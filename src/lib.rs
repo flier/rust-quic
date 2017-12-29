@@ -20,6 +20,7 @@ extern crate matches;
 extern crate pretty_env_logger;
 
 mod errors;
+#[macro_use]
 mod tag;
 mod version;
 mod frames;

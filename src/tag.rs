@@ -14,7 +14,14 @@ pub struct QuicTag(pub u32);
 
 impl QuicTag {
     pub fn new(s: &[u8]) -> Self {
-        QuicTag(LittleEndian::read_u32(s))
+        let bytes = s
+            .iter()
+            .cloned()
+            .chain(iter::repeat(0))
+            .take(4)
+            .collect::<Vec<u8>>();
+
+        QuicTag(LittleEndian::read_u32(&bytes))
     }
 
     pub fn as_bytes(&self) -> &[u8] {
@@ -42,14 +49,7 @@ impl FromStr for QuicTag {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let bytes = s.as_bytes()
-            .iter()
-            .cloned()
-            .chain(iter::repeat(0))
-            .take(4)
-            .collect::<Vec<u8>>();
-
-        Ok(QuicTag(LittleEndian::read_u32(&bytes)))
+        Ok(QuicTag::new(s.as_bytes()))
     }
 }
 
@@ -57,6 +57,12 @@ impl fmt::Display for QuicTag {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.as_str())
     }
+}
+
+macro_rules! quic_tag {
+    ($s:expr) => {
+        $crate::tag::QuicTag((($s[3] as u32) << 24) + (($s[2] as u32) << 16) + (($s[1] as u32) << 8) + ($s[0] as u32))
+    };
 }
 
 named!(pub quic_tag<QuicTag>, map!(le_u32, QuicTag));
@@ -73,7 +79,7 @@ mod tests {
 
         assert_eq!(quic_tag(b"EXMP"), IResult::Done(&b""[..], exmp));
 
-        assert_eq!(exmp, QuicTag::new(b"EXMP"));
+        assert_eq!(exmp, quic_tag!(b"EXMP"));
         assert_eq!(exmp.as_bytes(), b"EXMP");
         assert_eq!(exmp.as_str(), "EXMP");
 

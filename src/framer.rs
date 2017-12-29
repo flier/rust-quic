@@ -3,6 +3,7 @@ use std::time::Instant;
 use byteorder::{ByteOrder, NativeEndian, NetworkEndian};
 use failure::{Error, ResultExt};
 
+use crypto::{CryptoHandshakeMessage, kPRST};
 use errors::QuicError;
 use packet::{quic_version, EncryptedPacket, PublicHeader, QuicVersionNegotiationPacket, ToEndianness};
 use version::QuicVersion;
@@ -104,30 +105,36 @@ where
 
     fn process_version_negotiation_packet<'p>(
         &self,
-        buf: &'p [u8],
+        input: &'p [u8],
         mut public_header: PublicHeader<'p>,
     ) -> Result<&'p [u8], Error> {
         // Try reading at least once to raise error if the packet is invalid.
-        public_header.versions = Some(parse_version_negotiation_packet(buf)
+        public_header.versions = Some(parse_version_negotiation_packet(input)
             .to_full_result()
             .map_err(QuicError::from)
             .context("Unable to read supported version in negotiation.")?);
 
         self.visitor.on_version_negotiation_packet(public_header);
 
-        Ok(buf)
+        Ok(input)
     }
 
     fn process_public_reset_packet<'p>(
         &self,
-        buf: &'p [u8],
+        input: &'p [u8],
         public_header: PublicHeader<'p>,
     ) -> Result<&'p [u8], Error> {
-        Ok(buf)
+        let (remaining, message) = CryptoHandshakeMessage::parse(input).context("unable to read reset message")?;
+
+        if message.tag != kPRST {
+            bail!("Incorrect message tag: {}.", message.tag);
+        }
+
+        Ok(remaining)
     }
 
-    fn process_data_packet<'p>(&self, buf: &'p [u8], public_header: PublicHeader<'p>) -> Result<&'p [u8], Error> {
-        Ok(buf)
+    fn process_data_packet<'p>(&self, input: &'p [u8], public_header: PublicHeader<'p>) -> Result<&'p [u8], Error> {
+        Ok(input)
     }
 }
 

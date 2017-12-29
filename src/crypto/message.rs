@@ -13,8 +13,8 @@ const kMaxEntries: usize = 128;
 /// that's convenient for a CryptoFramer to serialize from or parse into.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CryptoHandshakeMessage<'a> {
-    tag: QuicTag,
-    values: Vec<(QuicTag, &'a [u8])>,
+    pub tag: QuicTag,
+    pub values: Vec<(QuicTag, &'a [u8])>,
 }
 
 impl<'a> CryptoHandshakeMessage<'a> {
