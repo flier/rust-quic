@@ -23,6 +23,7 @@ mod errors;
 #[macro_use]
 mod tag;
 mod version;
+mod sockaddr;
 mod frames;
 mod crypto;
 mod packet;

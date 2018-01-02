@@ -9,13 +9,12 @@ use byteorder::{ByteOrder, LittleEndian};
 use failure::Error;
 use nom::le_u32;
 
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Hash)]
 pub struct QuicTag(pub u32);
 
 impl QuicTag {
     pub fn new(s: &[u8]) -> Self {
-        let bytes = s
-            .iter()
+        let bytes = s.iter()
             .cloned()
             .chain(iter::repeat(0))
             .take(4)
@@ -61,7 +60,11 @@ impl fmt::Display for QuicTag {
 
 macro_rules! quic_tag {
     ($s:expr) => {
-        $crate::tag::QuicTag((($s[3] as u32) << 24) + (($s[2] as u32) << 16) + (($s[1] as u32) << 8) + ($s[0] as u32))
+        $crate::tag::QuicTag(
+            (($s[3] as u32) << 24) +
+            (($s[2] as u32) << 16) +
+            (($s[1] as u32) << 8) +
+             ($s[0] as u32))
     };
 }
 

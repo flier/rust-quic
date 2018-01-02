@@ -1,5 +1,9 @@
 #![allow(non_upper_case_globals)]
+use std::collections::HashMap;
+use std::mem;
+use std::str;
 
+use byteorder::{ByteOrder, LittleEndian};
 use failure::{Error, Fail};
 use nom::{IResult, Needed, le_u16, le_u32};
 
@@ -13,15 +17,15 @@ const kMaxEntries: usize = 128;
 /// that's convenient for a CryptoFramer to serialize from or parse into.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CryptoHandshakeMessage<'a> {
-    pub tag: QuicTag,
-    pub values: Vec<(QuicTag, &'a [u8])>,
+    tag: QuicTag,
+    values: HashMap<QuicTag, &'a [u8]>,
 }
 
 impl<'a> CryptoHandshakeMessage<'a> {
     pub fn parse(input: &'a [u8]) -> Result<(&'a [u8], CryptoHandshakeMessage<'a>), Error> {
         match parse_crypto_handshake_message(input) {
             IResult::Done(remaining, (tag, entries)) => {
-                let mut values = vec![];
+                let mut values = HashMap::new();
                 let mut last_tag = None;
                 let mut last_offset = 0;
 
@@ -49,7 +53,7 @@ impl<'a> CryptoHandshakeMessage<'a> {
                         );
                     }
 
-                    values.push((tag, &remaining[last_offset..offset]));
+                    values.insert(tag, &remaining[last_offset..offset]);
 
                     last_tag = Some(tag);
                     last_offset = offset;
@@ -64,6 +68,47 @@ impl<'a> CryptoHandshakeMessage<'a> {
                 bail!(QuicError::IncompletePacket(needed).context("incomplete crypto handshake message."))
             }
             IResult::Error(err) => bail!(QuicError::InvalidPacket(err).context("unable to crypto handshake message.")),
+        }
+    }
+
+    pub fn tag(&self) -> QuicTag {
+        self.tag
+    }
+
+    pub fn contains(&self, tag: QuicTag) -> bool {
+        self.values.contains_key(&tag)
+    }
+
+    pub fn get_bytes(&self, tag: QuicTag) -> Option<&[u8]> {
+        self.values.get(&tag).cloned()
+    }
+
+    pub fn get_str(&self, tag: QuicTag) -> Option<&str> {
+        self.values
+            .get(&tag)
+            .map(|s| unsafe { str::from_utf8_unchecked(s) })
+    }
+
+    pub fn get_u32(&self, tag: QuicTag) -> Result<u32, Error> {
+        self.get_pod(tag, LittleEndian::read_u32)
+    }
+
+    pub fn get_u64(&self, tag: QuicTag) -> Result<u64, Error> {
+        self.get_pod(tag, LittleEndian::read_u64)
+    }
+
+    fn get_pod<T, F>(&self, tag: QuicTag, read: F) -> Result<T, Error>
+    where
+        F: FnOnce(&[u8]) -> T,
+    {
+        if let Some(value) = self.values.get(&tag) {
+            if value.len() == mem::size_of::<T>() {
+                Ok(read(value))
+            } else {
+                bail!(QuicError::InvalidParam(tag))
+            }
+        } else {
+            bail!(QuicError::ParamNotFound(tag))
         }
     }
 }
@@ -84,10 +129,13 @@ named!(
 
 #[cfg(test)]
 mod tests {
+    use std::iter::FromIterator;
+
     use super::*;
 
     #[test]
     fn test_parse() {
+        #[cfg_attr(rustfmt, rustfmt_skip)]
         let input = &[
             // tag
             0x33, 0x77, 0xAA, 0xFF,
@@ -115,10 +163,10 @@ mod tests {
                 &b""[..],
                 CryptoHandshakeMessage {
                     tag: QuicTag(0xFFAA7733),
-                    values: vec![
-                        (QuicTag(0x12345678), b"abcdef"),
-                        (QuicTag(0x12345679), b"ghijk"),
-                    ],
+                    values: HashMap::from_iter(vec![
+                        (QuicTag(0x12345678), &b"abcdef"[..]),
+                        (QuicTag(0x12345679), &b"ghijk"[..]),
+                    ]),
                 }
             )
         );

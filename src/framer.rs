@@ -2,10 +2,13 @@ use std::time::Instant;
 
 use byteorder::{ByteOrder, NativeEndian, NetworkEndian};
 use failure::{Error, ResultExt};
+use nom::IResult;
 
-use crypto::{CryptoHandshakeMessage, kPRST};
+use crypto::{CryptoHandshakeMessage, kCADR, kPRST, kRNON};
 use errors::QuicError;
-use packet::{quic_version, EncryptedPacket, PublicHeader, QuicVersionNegotiationPacket, ToEndianness};
+use packet::{quic_version, EncryptedPacket, PublicHeader, QuicPublicResetPacket, QuicVersionNegotiationPacket,
+             ToEndianness};
+use sockaddr::socket_address;
 use version::QuicVersion;
 
 pub trait Perspective {
@@ -28,6 +31,9 @@ pub trait QuicFramerVisitor {
 
     /// Called only when `perspective` is IS_CLIENT and a version negotiation packet has been parsed.
     fn on_version_negotiation_packet(&self, packet: QuicVersionNegotiationPacket);
+
+    /// Called when a public reset packet has been parsed but has not yet been validated.
+    fn on_public_reset_packet(&self, packet: QuicPublicResetPacket);
 }
 
 /// Class for parsing and constructing QUIC packets.
@@ -126,9 +132,23 @@ where
     ) -> Result<&'p [u8], Error> {
         let (remaining, message) = CryptoHandshakeMessage::parse(input).context("unable to read reset message")?;
 
-        if message.tag != kPRST {
-            bail!("Incorrect message tag: {}.", message.tag);
+        if message.tag() != kPRST {
+            bail!("Incorrect message tag: {}.", message.tag());
         }
+
+        let packet = QuicPublicResetPacket {
+            public_header,
+            nonce_proof: message.get_u64(kRNON)?,
+            client_address: message.get_bytes(kCADR).and_then(|s| {
+                if let IResult::Done(_, addr) = socket_address(s) {
+                    addr
+                } else {
+                    None
+                }
+            }),
+        };
+
+        self.visitor.on_public_reset_packet(packet);
 
         Ok(remaining)
     }
@@ -138,4 +158,7 @@ where
     }
 }
 
-named!(parse_version_negotiation_packet<&[u8], Vec<QuicVersion>>, many1!(quic_version));
+named!(
+    parse_version_negotiation_packet<Vec<QuicVersion>>,
+    many1!(quic_version)
+);

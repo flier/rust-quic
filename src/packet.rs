@@ -1,5 +1,6 @@
 #![allow(non_upper_case_globals)]
 
+use std::net::SocketAddr;
 use std::ops::Deref;
 use std::str::FromStr;
 
@@ -62,9 +63,10 @@ bitflags! {
 
 pub type ConnectionId = u64;
 pub type DiversificationNonce = [u8; 32];
+pub type QuicPublicResetNonceProof = u64;
 pub type PacketNumber = u64;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct PublicHeader<'a> {
     pub reset_flag: bool,
     pub connection_id: Option<ConnectionId>,
@@ -86,6 +88,13 @@ impl<'a> PublicHeader<'a> {
             IResult::Error(err) => bail!(QuicError::InvalidPacket(err).context("unable to process public header.")),
         }
     }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct QuicPublicResetPacket<'a> {
+    pub public_header: PublicHeader<'a>,
+    pub nonce_proof: QuicPublicResetNonceProof,
+    pub client_address: Option<SocketAddr>,
 }
 
 pub trait ToEndianness {
@@ -204,22 +213,24 @@ mod tests {
             IResult::Incomplete(Needed::Size(9))
         );
 
+        #[cfg_attr(rustfmt, rustfmt_skip)]
         let packet38 = [
             // public flags (8 byte connection_id)
             0x38,
             // connection_id
             0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
             // packet number
-            0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12
+            0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12,
         ];
 
+        #[cfg_attr(rustfmt, rustfmt_skip)]
         let packet39 = [
             // public flags (8 byte connection_id)
             0x38,
             // connection_id
             0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
             // packet number
-            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC
+            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC,
         ];
 
         assert_eq!(
