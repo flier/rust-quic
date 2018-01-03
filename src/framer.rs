@@ -6,8 +6,8 @@ use nom::IResult;
 
 use crypto::{CryptoHandshakeMessage, kCADR, kPRST, kRNON};
 use errors::QuicError;
-use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketPublicHeader, QuicPublicResetPacket,
-             QuicVersionNegotiationPacket, ToEndianness};
+use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketNumber, QuicPacketNumberLength,
+             QuicPacketPublicHeader, QuicPublicResetPacket, QuicVersionNegotiationPacket, ToEndianness};
 use sockaddr::socket_address;
 use version::QuicVersion;
 
@@ -42,11 +42,16 @@ pub trait QuicFramerVisitor {
 
 /// Class for parsing and constructing QUIC packets.
 /// It has a `FramerVisitor` that is called when packets are parsed.
+#[derive(Clone, Debug)]
 pub struct QuicFramer<'a, V> {
     supported_versions: &'a [QuicVersion],
     quic_version: QuicVersion,
     creation_time: Instant,
     visitor: V,
+    // Updated by `process_packet_header` when it succeeds.
+    last_packet_number: QuicPacketNumber,
+    // Updated by `process_packet_header` when it succeeds decrypting a larger packet.
+    largest_packet_number: QuicPacketNumber,
 }
 
 impl<'a, V> QuicFramer<'a, V> {
@@ -56,6 +61,8 @@ impl<'a, V> QuicFramer<'a, V> {
             quic_version: supported_versions[0],
             creation_time,
             visitor,
+            last_packet_number: 0,
+            largest_packet_number: 0,
         }
     }
 
@@ -109,7 +116,7 @@ where
         } else if public_header.reset_flag {
             self.process_public_reset_packet(remaining, public_header)
         } else {
-            self.process_data_packet(remaining, public_header)
+            self.process_data_packet::<E>(remaining, public_header)
         }
     }
 
@@ -157,20 +164,115 @@ where
         Ok(remaining)
     }
 
-    fn process_data_packet<'p>(
+    fn process_data_packet<'p, E>(
         &self,
         input: &'p [u8],
         public_header: QuicPacketPublicHeader<'p>,
-    ) -> Result<&'p [u8], Error> {
+    ) -> Result<&'p [u8], Error>
+    where
+        E: ByteOrder,
+    {
+        let (remaining, header) = self.process_unauthenticated_header::<E>(input, public_header)?;
+
+        if !self.visitor.on_unauthenticated_header(&header) {
+            bail!("Visitor asked to stop processing of unauthenticated header.")
+        }
+
         Ok(input)
     }
 
-    fn process_unauthenticated_header<'p>(
+    fn process_unauthenticated_header<'p, E>(
         &self,
         input: &'p [u8],
         public_header: QuicPacketPublicHeader<'p>,
-    ) -> Result<&'p [u8], Error> {
-        Ok(input)
+    ) -> Result<(&'p [u8], QuicPacketHeader<'p>), Error>
+    where
+        E: ByteOrder,
+    {
+        let base_packet_number = self.largest_packet_number;
+
+        let (remaining, packet_number) = self.process_and_calculate_packet_number::<E>(
+            input,
+            public_header.packet_number_length as usize,
+            base_packet_number,
+        )?;
+
+        if packet_number == 0 {
+            bail!("packet numbers cannot be 0.")
+        }
+
+        Ok((
+            remaining,
+            QuicPacketHeader {
+                public_header,
+                packet_number,
+            },
+        ))
+    }
+
+    fn process_and_calculate_packet_number<'p, E>(
+        &self,
+        input: &'p [u8],
+        packet_number_length: usize,
+        base_packet_number: QuicPacketNumber,
+    ) -> Result<(&'p [u8], QuicPacketNumber), Error>
+    where
+        E: ByteOrder,
+    {
+        let wire_packet_number = E::read_uint(input, packet_number_length);
+
+        let packet_number =
+            self.calculate_packet_number_from_wire(packet_number_length, base_packet_number, wire_packet_number);
+
+        return Ok((&input[packet_number_length..], packet_number));
+    }
+
+    fn calculate_packet_number_from_wire(
+        &self,
+        packet_number_length: usize,
+        base_packet_number: QuicPacketNumber,
+        packet_number: QuicPacketNumber,
+    ) -> QuicPacketNumber {
+        // The new packet number might have wrapped to the next epoch, or
+        // it might have reverse wrapped to the previous epoch, or it might
+        // remain in the same epoch.  Select the packet number closest to the
+        // next expected packet number, the previous packet number plus 1.
+
+        // epoch_delta is the delta between epochs the packet number was serialized
+        // with, so the correct value is likely the same epoch as the last sequence
+        // number or an adjacent epoch.
+        let epoch_delta = 1 << (8 * packet_number_length);
+
+        let next_packet_number = base_packet_number + 1;
+        let epoch = base_packet_number & !(epoch_delta - 1);
+        let prev_epoch = epoch - epoch_delta;
+        let next_epoch = epoch + epoch_delta;
+
+        return closest_to(
+            next_packet_number,
+            epoch + packet_number,
+            closest_to(
+                next_packet_number,
+                prev_epoch + packet_number,
+                next_epoch + packet_number,
+            ),
+        );
+    }
+}
+
+fn delta(a: QuicPacketNumber, b: QuicPacketNumber) -> QuicPacketNumber {
+    if a < b {
+        b - a
+    } else {
+        a - b
+    }
+}
+
+fn closest_to(target: QuicPacketNumber, a: QuicPacketNumber, b: QuicPacketNumber) -> QuicPacketNumber {
+    if delta(target, a) < delta(target, b) {
+        a
+    } else {
+        b
     }
 }
 

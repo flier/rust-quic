@@ -73,18 +73,18 @@ bitflags! {
     }
 }
 
-pub type ConnectionId = u64;
-pub type DiversificationNonce = [u8; 32];
+pub type QuicConnectionId = u64;
+pub type QuicDiversificationNonce = [u8; 32];
 pub type QuicPublicResetNonceProof = u64;
-pub type PacketNumber = u64;
+pub type QuicPacketNumber = u64;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct QuicPacketPublicHeader<'a> {
     pub reset_flag: bool,
-    pub connection_id: Option<ConnectionId>,
+    pub connection_id: Option<QuicConnectionId>,
     pub packet_number_length: QuicPacketNumberLength,
     pub versions: Option<Vec<QuicVersion>>,
-    pub nonce: Option<&'a DiversificationNonce>,
+    pub nonce: Option<&'a QuicDiversificationNonce>,
 }
 
 impl<'a> QuicPacketPublicHeader<'a> {
@@ -104,7 +104,7 @@ impl<'a> QuicPacketPublicHeader<'a> {
 
 pub struct QuicPacketHeader<'a> {
     pub public_header: QuicPacketPublicHeader<'a>,
-    pub packet_number: PacketNumber,
+    pub packet_number: QuicPacketNumber,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -214,10 +214,10 @@ named!(pub quic_version<QuicVersion>, map_res!(take_str!(4), FromStr::from_str))
 #[cfg(test)]
 mod tests {
     use super::*;
-    use packet::{ConnectionId, PacketNumber};
+    use packet::{QuicConnectionId, QuicPacketNumber};
 
-    const kConnectionId: ConnectionId = 0xFEDCBA9876543210;
-    const kPacketNumber: PacketNumber = 0x123456789ABC;
+    const kConnectionId: QuicConnectionId = 0xFEDCBA9876543210;
+    const kPacketNumber: QuicPacketNumber = 0x123456789ABC;
 
     #[test]
     fn test_parse_public_header() {
