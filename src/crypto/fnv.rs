@@ -6,6 +6,16 @@ use extprim::u128::u128;
 const kPrime: u128 = u128!(309485009821345068724781371);
 const kOffset: u128 = u128!(144066263297769815596495629667062367629);
 
+fn fnv0(data: &[u8]) -> u128 {
+    fnv1(u128::zero(), data)
+}
+
+fn fnv1(uhash: u128, data: &[u8]) -> u128 {
+    data.iter().fold(uhash, |hash, &b| {
+        hash.wrapping_mul(kPrime) ^ u128::new(b as u64)
+    })
+}
+
 fn fnv1a(uhash: u128, data: &[u8]) -> u128 {
     data.iter().fold(uhash, |hash, &b| {
         (hash ^ u128::new(b as u64)).wrapping_mul(kPrime)
@@ -57,29 +67,54 @@ mod tests {
 
     #[test]
     fn test_fnv() {
+        assert_eq!(fnv0(b"chongo <Landon Curt Noll> /\\../\\"), kOffset);
+
+        assert_eq!(
+            fnv1(
+                kOffset,
+                &[
+                    0x20,
+                    0x28,
+                    0x4e,
+                    0x43,
+                    0x40,
+                    0x55,
+                    0x6f,
+                    0x99,
+                    0x25,
+                    0x1b,
+                    0x89,
+                    0xf4,
+                    0xa8,
+                    0x18,
+                    0xec,
+                    0x76,
+                    0xc0
+                ][..]
+            ),
+            u128!(0)
+        );
+
+        assert_eq!(
+            fnv1a(kOffset, b""),
+            u128!(0x6c62272e07bb014262b821756295c58d)
+        );
+        assert_eq!(
+            fnv1a(kOffset, b"a"),
+            u128!(0xd228cb696f1a8caf78912b704e4a8964)
+        );
+        assert_eq!(
+            fnv1a(kOffset, b"foobar"),
+            u128!(0x343e1662793c64bf6f0d3597ba446f18)
+        );
+    }
+
+    #[test]
+    fn test_fnv_hasher() {
         let mut hasher = FnvHasher::default();
 
-        &[
-            0x20,
-            0x28,
-            0x4e,
-            0x43,
-            0x40,
-            0x55,
-            0x6f,
-            0x99,
-            0x25,
-            0x1b,
-            0x89,
-            0xf4,
-            0xa8,
-            0x18,
-            0xec,
-            0x76,
-            0xc0,
-        ][..]
-            .hash(&mut hasher);
+        (b"hello").hash(&mut hasher);
 
-        assert_eq!(hasher.hash(), u128!(0));
+        assert_eq!(hasher.hash(), u128!(61618612999977099786232690236130642872));
     }
 }
