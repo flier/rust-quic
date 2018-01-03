@@ -6,8 +6,8 @@ use nom::IResult;
 
 use crypto::{CryptoHandshakeMessage, kCADR, kPRST, kRNON};
 use errors::QuicError;
-use packet::{quic_version, EncryptedPacket, PublicHeader, QuicPublicResetPacket, QuicVersionNegotiationPacket,
-             ToEndianness};
+use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketPublicHeader, QuicPublicResetPacket,
+             QuicVersionNegotiationPacket, ToEndianness};
 use sockaddr::socket_address;
 use version::QuicVersion;
 
@@ -21,7 +21,7 @@ pub trait QuicFramerVisitor {
 
     /// Called when the public header has been parsed, but has not been authenticated.
     /// If it returns false, framing for this packet will cease.
-    fn on_unauthenticated_public_header(&self, header: &PublicHeader) -> bool;
+    fn on_unauthenticated_public_header(&self, header: &QuicPacketPublicHeader) -> bool;
 
     /// Called only when `perspective` is IS_SERVER and the framer gets a packet with version flag true
     /// and the version on the packet doesn't match `quic_version`.
@@ -34,6 +34,10 @@ pub trait QuicFramerVisitor {
 
     /// Called when a public reset packet has been parsed but has not yet been validated.
     fn on_public_reset_packet(&self, packet: QuicPublicResetPacket);
+
+    /// Called when the unauthenticated portion of the header has been parsed.
+    /// If OnUnauthenticatedHeader returns false, framing for this packet will cease.
+    fn on_unauthenticated_header(&self, header: &QuicPacketHeader) -> bool;
 }
 
 /// Class for parsing and constructing QUIC packets.
@@ -85,7 +89,7 @@ where
         self.visitor.on_packet();
 
         // First parse the public header.
-        let (remaining, public_header) = PublicHeader::parse::<E>(packet, P::is_server())?;
+        let (remaining, public_header) = QuicPacketPublicHeader::parse::<E>(packet, P::is_server())?;
 
         if public_header.reset_flag && public_header.versions.is_some() {
             bail!("Got version flag in reset packet");
@@ -112,7 +116,7 @@ where
     fn process_version_negotiation_packet<'p>(
         &self,
         input: &'p [u8],
-        mut public_header: PublicHeader<'p>,
+        mut public_header: QuicPacketPublicHeader<'p>,
     ) -> Result<&'p [u8], Error> {
         // Try reading at least once to raise error if the packet is invalid.
         public_header.versions = Some(parse_version_negotiation_packet(input)
@@ -128,7 +132,7 @@ where
     fn process_public_reset_packet<'p>(
         &self,
         input: &'p [u8],
-        public_header: PublicHeader<'p>,
+        public_header: QuicPacketPublicHeader<'p>,
     ) -> Result<&'p [u8], Error> {
         let (remaining, message) = CryptoHandshakeMessage::parse(input).context("unable to read reset message")?;
 
@@ -153,7 +157,19 @@ where
         Ok(remaining)
     }
 
-    fn process_data_packet<'p>(&self, input: &'p [u8], public_header: PublicHeader<'p>) -> Result<&'p [u8], Error> {
+    fn process_data_packet<'p>(
+        &self,
+        input: &'p [u8],
+        public_header: QuicPacketPublicHeader<'p>,
+    ) -> Result<&'p [u8], Error> {
+        Ok(input)
+    }
+
+    fn process_unauthenticated_header<'p>(
+        &self,
+        input: &'p [u8],
+        public_header: QuicPacketPublicHeader<'p>,
+    ) -> Result<&'p [u8], Error> {
         Ok(input)
     }
 }

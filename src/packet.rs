@@ -12,13 +12,25 @@ use nom::{Endianness, IResult, Needed, be_u64, be_u8};
 use errors::QuicError;
 use version::QuicVersion;
 
-const PACKET_FLAGS_1BYTE_PACKET: u8 = 0; // 00
-const PACKET_FLAGS_2BYTE_PACKET: u8 = 1; // 01
-const PACKET_FLAGS_4BYTE_PACKET: u8 = 1 << 1; // 10
-const PACKET_FLAGS_8BYTE_PACKET: u8 = 1 << 1 | 1; // 11
+pub type QuicPacketNumberLength = u8;
+
+const PACKET_1BYTE_PACKET_NUMBER: QuicPacketNumberLength = 1;
+const PACKET_2BYTE_PACKET_NUMBER: QuicPacketNumberLength = 2;
+const PACKET_4BYTE_PACKET_NUMBER: QuicPacketNumberLength = 4;
+// TODO(rch): Remove this when we remove QUIC_VERSION_39.
+const PACKET_6BYTE_PACKET_NUMBER: QuicPacketNumberLength = 6;
+const PACKET_8BYTE_PACKET_NUMBER: QuicPacketNumberLength = 8;
+
+pub type QuicPacketNumberLengthFlags = u8;
+
+const PACKET_FLAGS_1BYTE_PACKET: QuicPacketNumberLengthFlags = 0; // 00
+const PACKET_FLAGS_2BYTE_PACKET: QuicPacketNumberLengthFlags = 1; // 01
+const PACKET_FLAGS_4BYTE_PACKET: QuicPacketNumberLengthFlags = 1 << 1; // 10
+const PACKET_FLAGS_8BYTE_PACKET: QuicPacketNumberLengthFlags = 1 << 1 | 1; // 11
 
 /// Number of bits the packet number length bits are shifted from the right edge of the public header.
 const kPublicHeaderSequenceNumberShift: u8 = 4;
+const kPublicHeaderSequenceNumberMask: u8 = 0x03;
 
 bitflags! {
     pub struct PublicFlags: u8 {
@@ -67,16 +79,16 @@ pub type QuicPublicResetNonceProof = u64;
 pub type PacketNumber = u64;
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct PublicHeader<'a> {
+pub struct QuicPacketPublicHeader<'a> {
     pub reset_flag: bool,
     pub connection_id: Option<ConnectionId>,
+    pub packet_number_length: QuicPacketNumberLength,
     pub versions: Option<Vec<QuicVersion>>,
     pub nonce: Option<&'a DiversificationNonce>,
-    pub packet_number: PacketNumber,
 }
 
-impl<'a> PublicHeader<'a> {
-    pub fn parse<E>(buf: &[u8], is_server: bool) -> Result<(&[u8], PublicHeader), Error>
+impl<'a> QuicPacketPublicHeader<'a> {
+    pub fn parse<E>(buf: &[u8], is_server: bool) -> Result<(&[u8], QuicPacketPublicHeader), Error>
     where
         E: ByteOrder + ToEndianness,
     {
@@ -90,9 +102,14 @@ impl<'a> PublicHeader<'a> {
     }
 }
 
+pub struct QuicPacketHeader<'a> {
+    pub public_header: QuicPacketPublicHeader<'a>,
+    pub packet_number: PacketNumber,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct QuicPublicResetPacket<'a> {
-    pub public_header: PublicHeader<'a>,
+    pub public_header: QuicPacketPublicHeader<'a>,
     pub nonce_proof: QuicPublicResetNonceProof,
     pub client_address: Option<SocketAddr>,
 }
@@ -127,7 +144,7 @@ impl Deref for EncryptedPacket {
     }
 }
 
-pub type QuicVersionNegotiationPacket<'a> = PublicHeader<'a>;
+pub type QuicVersionNegotiationPacket<'a> = QuicPacketPublicHeader<'a>;
 
 /// Recognizes big endian unsigned 8 bytes integer
 #[inline]
@@ -156,7 +173,7 @@ pub fn le_u48(i: &[u8]) -> IResult<&[u8], u64> {
 #[macro_export]
 macro_rules! u48 ( ($i:expr, $e:expr) => ( {if Endianness::Big == $e { be_u48($i) } else { le_u48($i) } } ););
 
-named_args!(parse_public_header(endianness: Endianness, is_server: bool)<PublicHeader>,
+named_args!(parse_public_header(endianness: Endianness, is_server: bool)<QuicPacketPublicHeader>,
     do_parse!(
         public_flags: map!(call!(be_u8), PublicFlags::from_bits_truncate) >>
 
@@ -171,20 +188,22 @@ named_args!(parse_public_header(endianness: Endianness, is_server: bool)<PublicH
         nonce_flag: value!(public_flags.contains(PublicFlags::PACKET_PUBLIC_FLAGS_NONCE)) >>
         nonce: cond!(!is_server && nonce_flag && !reset_flag && !version_flag, take!(32)) >>
 
-        packet_number_length: value!(public_flags.bits() >> 4 & 0x03) >>
-        packet_number: switch!(value!(packet_number_length),
-            PACKET_FLAGS_1BYTE_PACKET => map!(be_u8, Into::into) |
-            PACKET_FLAGS_2BYTE_PACKET => map!(u16!(endianness), Into::into) |
-            PACKET_FLAGS_4BYTE_PACKET => map!(u32!(endianness), Into::into) |
-            PACKET_FLAGS_8BYTE_PACKET => u48!(endianness)
+        packet_number_length_flag: value!(
+            (public_flags.bits() >> kPublicHeaderSequenceNumberShift) & kPublicHeaderSequenceNumberMask
         ) >>
         (
-            PublicHeader{
+            QuicPacketPublicHeader{
                 reset_flag,
                 connection_id,
                 versions: server_version.map(|version| vec![version]),
                 nonce: nonce.map(|nonce| array_ref!(nonce, 0, 32)),
-                packet_number,
+                packet_number_length: match packet_number_length_flag {
+                    PACKET_FLAGS_1BYTE_PACKET => PACKET_1BYTE_PACKET_NUMBER,
+                    PACKET_FLAGS_2BYTE_PACKET => PACKET_2BYTE_PACKET_NUMBER,
+                    PACKET_FLAGS_4BYTE_PACKET => PACKET_4BYTE_PACKET_NUMBER,
+                    PACKET_FLAGS_8BYTE_PACKET => PACKET_6BYTE_PACKET_NUMBER,
+                    _ => unreachable!()
+                },
             }
         )
     )
@@ -236,13 +255,13 @@ mod tests {
         assert_eq!(
             parse_public_header(&packet38, Endianness::Little, true),
             IResult::Done(
-                &b""[..],
-                PublicHeader {
+                &[0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12][..],
+                QuicPacketPublicHeader {
                     reset_flag: false,
                     connection_id: Some(kConnectionId),
                     versions: None,
                     nonce: None,
-                    packet_number: kPacketNumber,
+                    packet_number_length: PACKET_6BYTE_PACKET_NUMBER,
                 }
             )
         );
@@ -250,13 +269,13 @@ mod tests {
         assert_eq!(
             parse_public_header(&packet39, Endianness::Big, true),
             IResult::Done(
-                &b""[..],
-                PublicHeader {
+                &[0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC][..],
+                QuicPacketPublicHeader {
                     reset_flag: false,
                     connection_id: Some(kConnectionId),
                     versions: None,
                     nonce: None,
-                    packet_number: kPacketNumber,
+                    packet_number_length: PACKET_6BYTE_PACKET_NUMBER,
                 }
             )
         );
