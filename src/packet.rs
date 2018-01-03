@@ -12,6 +12,21 @@ use nom::{Endianness, IResult, Needed, be_u64, be_u8};
 use errors::QuicError;
 use version::QuicVersion;
 
+/// Number of bytes reserved for public flags in the packet header.
+const kPublicFlagsSize: usize = 1;
+/// Number of bytes reserved for version number in the packet header.
+const kQuicVersionSize: usize = 4;
+/// Number of bytes reserved for path id in the packet header.
+const kQuicPathIdSize: usize = 1;
+/// Number of bytes reserved for private flags in the packet header.
+const kPrivateFlagsSize: usize = 1;
+
+const kPublicHeaderConnectionIdSize: usize = 8;
+
+/// kDiversificationNonceSize is the size, in bytes, of the nonce
+/// that a server may set in the packet header to ensure that its INITIAL keys are not duplicated.
+const kDiversificationNonceSize: usize = 32;
+
 pub type QuicPacketNumberLength = u8;
 
 const PACKET_1BYTE_PACKET_NUMBER: QuicPacketNumberLength = 1;
@@ -100,11 +115,35 @@ impl<'a> QuicPacketPublicHeader<'a> {
             IResult::Error(err) => bail!(QuicError::InvalidPacket(err).context("unable to process public header.")),
         }
     }
+
+    pub fn size(&self) -> usize {
+        kPublicFlagsSize + if self.connection_id.is_some() {
+            kPublicHeaderConnectionIdSize
+        } else {
+            0
+        } + if self.versions.is_some() {
+            kQuicVersionSize
+        } else {
+            0
+        } + if self.nonce.is_some() {
+            kDiversificationNonceSize
+        } else {
+            0
+        } + self.packet_number_length as usize
+    }
 }
 
 pub struct QuicPacketHeader<'a> {
     pub public_header: QuicPacketPublicHeader<'a>,
     pub packet_number: QuicPacketNumber,
+}
+
+impl<'a> Deref for QuicPacketHeader<'a> {
+    type Target = QuicPacketPublicHeader<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.public_header
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -136,11 +175,17 @@ pub struct QuicData {}
 #[derive(Clone, Debug)]
 pub struct EncryptedPacket(Bytes);
 
+impl EncryptedPacket {
+    pub fn as_bytes(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
 impl Deref for EncryptedPacket {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
-        self.0.as_ref()
+        self.as_bytes()
     }
 }
 

@@ -1,0 +1,85 @@
+#![allow(non_upper_case_globals)]
+use std::hash::{BuildHasherDefault, Hasher};
+
+use extprim::u128::u128;
+
+const kPrime: u128 = u128!(309485009821345068724781371);
+const kOffset: u128 = u128!(144066263297769815596495629667062367629);
+
+fn fnv1a(uhash: u128, data: &[u8]) -> u128 {
+    data.iter().fold(uhash, |hash, &b| {
+        (hash ^ u128::new(b as u64)).wrapping_mul(kPrime)
+    })
+}
+
+pub struct FnvHasher(u128);
+
+impl Default for FnvHasher {
+    #[inline]
+    fn default() -> FnvHasher {
+        FnvHasher(kOffset)
+    }
+}
+
+impl FnvHasher {
+    /// Create an FNV hasher starting with a state corresponding to the hash `key`.
+    #[inline]
+    pub fn with_key(key: u128) -> FnvHasher {
+        FnvHasher(key)
+    }
+
+    #[inline]
+    pub fn hash(&self) -> u128 {
+        self.0
+    }
+}
+
+impl Hasher for FnvHasher {
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.0.low64()
+    }
+
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        self.0 = fnv1a(self.0, bytes)
+    }
+}
+
+/// A builder for default FNV hashers.
+pub type FnvBuildHasher = BuildHasherDefault<FnvHasher>;
+
+#[cfg(test)]
+mod tests {
+    use std::hash::Hash;
+
+    use super::*;
+
+    #[test]
+    fn test_fnv() {
+        let mut hasher = FnvHasher::default();
+
+        &[
+            0x20,
+            0x28,
+            0x4e,
+            0x43,
+            0x40,
+            0x55,
+            0x6f,
+            0x99,
+            0x25,
+            0x1b,
+            0x89,
+            0xf4,
+            0xa8,
+            0x18,
+            0xec,
+            0x76,
+            0xc0,
+        ][..]
+            .hash(&mut hasher);
+
+        assert_eq!(hasher.hash(), u128!(0));
+    }
+}
