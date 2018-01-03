@@ -3,20 +3,20 @@ use std::hash::{BuildHasherDefault, Hasher};
 
 use extprim::u128::u128;
 
-const kPrime: u128 = u128!(309485009821345068724781371);
-const kOffset: u128 = u128!(144066263297769815596495629667062367629);
+pub const kPrime: u128 = u128!(309485009821345068724781371);
+pub const kOffset: u128 = u128!(144066263297769815596495629667062367629);
 
-fn fnv0(data: &[u8]) -> u128 {
+pub fn fnv0(data: &[u8]) -> u128 {
     fnv1(u128::zero(), data)
 }
 
-fn fnv1(uhash: u128, data: &[u8]) -> u128 {
+pub fn fnv1(uhash: u128, data: &[u8]) -> u128 {
     data.iter().fold(uhash, |hash, &b| {
         hash.wrapping_mul(kPrime) ^ u128::new(b as u64)
     })
 }
 
-fn fnv1a(uhash: u128, data: &[u8]) -> u128 {
+pub fn fnv1a(uhash: u128, data: &[u8]) -> u128 {
     data.iter().fold(uhash, |hash, &b| {
         (hash ^ u128::new(b as u64)).wrapping_mul(kPrime)
     })
@@ -115,6 +115,10 @@ mod tests {
 
         (b"hello").hash(&mut hasher);
 
-        assert_eq!(hasher.hash(), u128!(61618612999977099786232690236130642872));
+        assert_eq!(hasher.hash(), u128!(0x2e5b502d462502fc5e5dcb2c452ccbb8));
+        assert_eq!(
+            fnv1a(kOffset, b"\x05\0\0\0\0\0\0\0hello"),
+            u128!(0x2e5b502d462502fc5e5dcb2c452ccbb8)
+        );
     }
 }

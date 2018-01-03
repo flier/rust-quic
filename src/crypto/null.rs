@@ -6,8 +6,7 @@ use extprim::u128::u128;
 use failure::{Error, Fail};
 use nom::{IResult, le_u32, le_u64};
 
-use crypto::FnvHasher;
-use crypto::QuicDecrypter;
+use crypto::{QuicDecrypter, fnv1a, kOffset};
 use errors::QuicError;
 use framer::Perspective;
 use packet::QuicPacketNumber;
@@ -31,21 +30,25 @@ where
     P: Perspective,
 {
     fn compute_hash(&self, version: QuicVersion, associated_data: &[u8], plain_text: &[u8]) -> u128 {
-        let mut hasher = FnvHasher::default();
-
-        if version > QuicVersion::QUIC_VERSION_35 {
+        let hash = if version > QuicVersion::QUIC_VERSION_35 {
             if P::is_server() {
-                (associated_data, plain_text, b"Server").hash(&mut hasher)
+                fnv1a(
+                    fnv1a(fnv1a(kOffset, associated_data), plain_text),
+                    b"Server",
+                )
             } else {
-                (associated_data, plain_text, b"Client").hash(&mut hasher)
+                fnv1a(
+                    fnv1a(fnv1a(kOffset, associated_data), plain_text),
+                    b"Client",
+                )
             }
         } else {
-            (associated_data, plain_text).hash(&mut hasher)
-        }
+            fnv1a(fnv1a(kOffset, associated_data), plain_text)
+        };
 
         let mask: u128 = u128!(0xffffffff) << 96;
 
-        hasher.hash() & !mask
+        hash & !mask
     }
 }
 
