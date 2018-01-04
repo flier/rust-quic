@@ -32,5 +32,3 @@ mod frames;
 mod crypto;
 mod packet;
 mod framer;
-
-pub use framer::{Perspective, QuicFramer, QuicFramerVisitor};

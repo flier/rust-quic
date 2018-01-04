@@ -7,3 +7,7 @@ pub enum EncryptionLevel {
     Initial,
     ForwardSecure,
 }
+
+pub trait Perspective {
+    fn is_server() -> bool;
+}

@@ -1,22 +1,18 @@
-use std::borrow::Cow;
 use std::mem;
 use std::time::Instant;
 
 use byteorder::{ByteOrder, NativeEndian, NetworkEndian};
+use bytes::Bytes;
 use failure::{Error, ResultExt};
 use nom::IResult;
 
 use crypto::{CryptoHandshakeMessage, NullDecrypter, QuicDecrypter, kCADR, kPRST, kRNON};
 use errors::QuicError;
-use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketNumber, QuicPacketNumberLength,
-             QuicPacketPublicHeader, QuicPublicResetPacket, QuicVersionNegotiationPacket, ToEndianness};
+use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketNumber, QuicPacketPublicHeader,
+             QuicPublicResetPacket, QuicVersionNegotiationPacket, ToEndianness};
 use sockaddr::socket_address;
-use types::EncryptionLevel;
+use types::{EncryptionLevel, Perspective};
 use version::QuicVersion;
-
-pub trait Perspective {
-    fn is_server() -> bool;
-}
 
 pub trait QuicFramerVisitor {
     /// Called when a new packet has been received, before it has been validated or processed.
@@ -328,7 +324,7 @@ where
         input: &'p [u8],
         header: QuicPacketHeader,
         packet: &'p EncryptedPacket,
-    ) -> Result<Cow<'p, [u8]>, Error>
+    ) -> Result<Bytes, Error>
     where
         P: Perspective,
     {
@@ -345,10 +341,9 @@ where
             return Ok(decrypted);
         }
 
-        if let Some( decrypter) = self.alternative_decrypter.take() {
+        if let Some(decrypter) = self.alternative_decrypter.take() {
             let try_alternative_decryption = self.alternative_decrypter_level != EncryptionLevel::Initial
-                || P::is_server()
-                || header.public_header.nonce.is_some();
+                || P::is_server() || header.public_header.nonce.is_some();
 
             if let Ok(decrypted) = decrypter.decrypt_packet(
                 self.quic_version,
@@ -364,10 +359,7 @@ where
                     self.decrypter_level = self.alternative_decrypter_level;
                     self.alternative_decrypter_level = EncryptionLevel::None;
                 } else {
-                    self.alternative_decrypter = Some(mem::replace(
-                        &mut self.decrypter,
-                        decrypter,
-                    ));
+                    self.alternative_decrypter = Some(mem::replace(&mut self.decrypter, decrypter));
                     self.decrypter_level = mem::replace(&mut self.alternative_decrypter_level, self.decrypter_level);
                 }
 

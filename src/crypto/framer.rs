@@ -1,7 +1,7 @@
 use failure::Error;
 
 use crypto::CryptoHandshakeMessage;
-use framer::Perspective;
+use types::Perspective;
 
 pub trait MessageParser {
     fn process<P>(&self, input: &[u8]) -> Result<(), Error>
