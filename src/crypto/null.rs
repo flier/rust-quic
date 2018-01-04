@@ -9,7 +9,7 @@ use nom::{IResult, le_u32, le_u64};
 
 use crypto::{QuicDecrypter, QuicEncrypter, fnv1a, kOffset};
 use errors::QuicError;
-use packet::QuicPacketNumber;
+use packet::{QuicDiversificationNonce, QuicPacketNumber};
 use types::Perspective;
 use version::QuicVersion;
 
@@ -73,6 +73,8 @@ impl<P> QuicDecrypter for NullDecrypter<P>
 where
     P: Perspective,
 {
+    fn set_preliminary_key(&mut self, nonce: QuicDiversificationNonce) {}
+
     fn decrypt_packet<'p>(
         &self,
         version: QuicVersion,

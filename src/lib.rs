@@ -15,7 +15,10 @@ extern crate failure_derive;
 extern crate log;
 #[macro_use]
 extern crate nom;
+extern crate ring;
 
+#[cfg(test)]
+extern crate hex;
 #[cfg(test)]
 #[macro_use]
 extern crate matches;
