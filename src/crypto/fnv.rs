@@ -6,18 +6,27 @@ use extprim::u128::u128;
 pub const kPrime: u128 = u128!(309485009821345068724781371);
 pub const kOffset: u128 = u128!(144066263297769815596495629667062367629);
 
-pub fn fnv0(data: &[u8]) -> u128 {
+pub fn fnv0<T>(data: T) -> u128
+where
+    T: AsRef<[u8]>,
+{
     fnv1(u128::zero(), data)
 }
 
-pub fn fnv1(uhash: u128, data: &[u8]) -> u128 {
-    data.iter().fold(uhash, |hash, &b| {
+pub fn fnv1<T>(uhash: u128, data: T) -> u128
+where
+    T: AsRef<[u8]>,
+{
+    data.as_ref().iter().fold(uhash, |hash, &b| {
         hash.wrapping_mul(kPrime) ^ u128::new(b as u64)
     })
 }
 
-pub fn fnv1a(uhash: u128, data: &[u8]) -> u128 {
-    data.iter().fold(uhash, |hash, &b| {
+pub fn fnv1a<T>(uhash: u128, data: T) -> u128
+where
+    T: AsRef<[u8]>,
+{
+    data.as_ref().iter().fold(uhash, |hash, &b| {
         (hash ^ u128::new(b as u64)).wrapping_mul(kPrime)
     })
 }
