@@ -1,10 +1,11 @@
 #![allow(non_upper_case_globals)]
 
 use std::iter;
+use std::borrow::Cow;
 use std::marker::PhantomData;
 
 use byteorder::NativeEndian;
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{BufMut, Bytes};
 use failure::Error;
 use ring::aead::{open_in_place, seal_in_place, AES_128_GCM_TRUNCATED_TAG_96, Algorithm, CHACHA_POLY1305_TRUNCATED_TAG_96 , OpeningKey, SealingKey};
 use ring::digest::SHA256;
@@ -38,8 +39,8 @@ impl AeadAlgorithm for ChaCha20Poly1305 {
 }
 
 pub struct AeadEncrypter<'a, A> {
-    key: &'a [u8],          // The key.
-    nonce_prefix: &'a [u8], // The nonce prefix.
+    key: Cow<'a, [u8]>,          // The key.
+    nonce_prefix: Cow<'a, [u8]>, // The nonce prefix.
     phantom: PhantomData<A>,
 }
 
@@ -49,8 +50,8 @@ where
 {
     pub fn new(key: &'a [u8], nonce_prefix: &'a [u8]) -> AeadEncrypter<'a, A> {
         AeadEncrypter {
-            key,
-            nonce_prefix,
+            key: key.into(),
+            nonce_prefix: nonce_prefix.into(),
             phantom: PhantomData,
         }
     }
@@ -79,7 +80,7 @@ where
         associated_data: &[u8],
         plain_text: &[u8],
     ) -> Result<Bytes, Error> {
-        let mut nonce = BytesMut::from(self.nonce_prefix);
+        let mut nonce = self.nonce_prefix.as_ref().to_vec();
 
         nonce.put_u64::<NativeEndian>(packet_number);
 
@@ -92,8 +93,8 @@ where
 }
 
 pub struct AeadDecrypter<'a, A> {
-    key: &'a [u8],          // The key.
-    nonce_prefix: &'a [u8], // The nonce prefix.
+    key: Cow<'a, [u8]>,          // The key.
+    nonce_prefix: Cow<'a, [u8]>, // The nonce prefix.
     phantom: PhantomData<A>,
 }
 
@@ -103,8 +104,8 @@ where
 {
     pub fn new(key: &'a [u8], nonce_prefix: &'a [u8]) -> AeadDecrypter<'a, A> {
         AeadDecrypter {
-            key,
-            nonce_prefix,
+            key: key.into(),
+            nonce_prefix: nonce_prefix.into(),
             phantom: PhantomData,
         }
     }
@@ -112,9 +113,9 @@ where
 
 impl<'a, A> QuicDecrypter for AeadDecrypter<'a, A>
 where
-    A: AeadAlgorithm,
+    A: 'static + AeadAlgorithm,
 {
-    fn set_preliminary_key(&mut self, nonce: QuicDiversificationNonce) {
+    fn with_preliminary_key(self, nonce: QuicDiversificationNonce) -> Box<QuicDecrypter> {
         let salt = SigningKey::new(&SHA256, &nonce[..]);
         let mut secret = self.key.to_vec();
 
@@ -127,8 +128,11 @@ where
         let (key, out) = out.split_at(self.key.len());
         let (nonce_prefix, _) = out.split_at(self.nonce_prefix.len());
 
-        // self.key = key.into();
-        // self.nonce_prefix = nonce_prefix.into();
+        Box::new(AeadDecrypter::<A> {
+            key: key.to_owned().into(),
+            nonce_prefix: nonce_prefix.to_owned().into(),
+            phantom: PhantomData,
+        })
     }
 
     fn decrypt_packet(
@@ -138,8 +142,8 @@ where
         associated_data: &[u8],
         cipher_text: &[u8],
     ) -> Result<Bytes, Error> {
-        let key = OpeningKey::new(A::algorithm(), self.key)?;
-        let mut nonce = BytesMut::from(self.nonce_prefix);
+        let key = OpeningKey::new(A::algorithm(), self.key.as_ref())?;
+        let mut nonce = self.nonce_prefix.as_ref().to_vec();
 
         nonce.put_u64::<NativeEndian>(packet_number);
 
@@ -147,7 +151,7 @@ where
             bail!("nonce length mismatch: {}", nonce.len());
         }
 
-        let mut buf = BytesMut::from(cipher_text);
+        let mut buf = cipher_text.to_vec();
 
         let plain_text = open_in_place(&key, &nonce, associated_data, 0, &mut buf)?;
 
