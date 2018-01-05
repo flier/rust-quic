@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 use byteorder::NativeEndian;
 use bytes::{BufMut, Bytes, BytesMut};
 use failure::Error;
-use ring::aead::{open_in_place, seal_in_place, AES_128_GCM, Algorithm, CHACHA20_POLY1305, OpeningKey, SealingKey};
+use ring::aead::{open_in_place, seal_in_place, AES_128_GCM_TRUNCATED_TAG_96, Algorithm, CHACHA_POLY1305_TRUNCATED_TAG_96 , OpeningKey, SealingKey};
 use ring::digest::SHA256;
 use ring::hkdf::extract_and_expand;
 use ring::hmac::SigningKey;
@@ -25,7 +25,7 @@ pub struct Aes128Gcm12 {}
 
 impl AeadAlgorithm for Aes128Gcm12 {
     fn algorithm() -> &'static Algorithm {
-        &AES_128_GCM
+        &AES_128_GCM_TRUNCATED_TAG_96
     }
 }
 
@@ -33,7 +33,7 @@ pub struct ChaCha20Poly1305 {}
 
 impl AeadAlgorithm for ChaCha20Poly1305 {
     fn algorithm() -> &'static Algorithm {
-        &CHACHA20_POLY1305
+        &CHACHA_POLY1305_TRUNCATED_TAG_96
     }
 }
 
@@ -56,7 +56,7 @@ where
     }
 
     fn encrypt(&self, nonce: &[u8], associated_data: &[u8], plain_text: &[u8]) -> Result<Bytes, Error> {
-        let key = SealingKey::with_auth_tag_len(A::algorithm(), &self.key, kAuthTagSize)?;
+        let key = SealingKey::new(A::algorithm(), &self.key)?;
         let tag_len = key.algorithm().tag_len();
         let mut buf = plain_text.to_vec();
 
@@ -138,7 +138,7 @@ where
         associated_data: &[u8],
         cipher_text: &[u8],
     ) -> Result<Bytes, Error> {
-        let key = OpeningKey::with_auth_tag_len(A::algorithm(), self.key, kAuthTagSize)?;
+        let key = OpeningKey::new(A::algorithm(), self.key)?;
         let mut nonce = BytesMut::from(self.nonce_prefix);
 
         nonce.put_u64::<NativeEndian>(packet_number);
