@@ -4,6 +4,7 @@ use failure::Error;
 use packet::QuicPacketNumber;
 use version::QuicVersion;
 
+/// `QuicEncrypter` implements the QUIC encrypter
 pub trait QuicEncrypter {
     /// Writes encrypted `plain_text` and a MAC over `plaintext` and `associated_data` into output.
     /// `packet_number` is appended to the `nonce_prefix` value provided in set_nonce_prefix() to form the nonce.

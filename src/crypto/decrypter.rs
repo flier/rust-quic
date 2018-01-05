@@ -5,10 +5,11 @@ use bytes::Bytes;
 use packet::{QuicDiversificationNonce, QuicPacketNumber};
 use version::QuicVersion;
 
+/// `QuicDecrypter` implements the QUIC decrypter
 pub trait QuicDecrypter {
     /// Sets the encryption key.
     ///
-    /// `decrypt_packet` may not be called until `set_preliminary_key` is called and
+    /// `decrypt_packet` may not be called until `with_preliminary_key` is called and
     /// the preliminary keying material will be combined with that nonce in order to
     /// create the actual key and nonce-prefix.
     fn with_preliminary_key(self, nonce: QuicDiversificationNonce) -> Box<QuicDecrypter>;

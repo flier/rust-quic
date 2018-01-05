@@ -43,7 +43,8 @@ pub trait QuicFramerVisitor {
 }
 
 /// Class for parsing and constructing QUIC packets.
-/// It has a `FramerVisitor` that is called when packets are parsed.
+///
+/// It has a `QuicFramerVisitor` that is called when packets are parsed.
 pub struct QuicFramer<'a, V> {
     supported_versions: &'a [QuicVersion],
     quic_version: QuicVersion,

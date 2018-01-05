@@ -18,38 +18,92 @@ use version::QuicVersion;
 
 const kAuthTagSize: usize = 12;
 
+/// An `Aes128Gcm12Encrypter` is a `QuicEncrypter`
+/// that implements the AEAD_AES_128_GCM_12 algorithm specified in RFC 5282.
+///
+/// Create an instance by calling QuicEncrypter::Create(kAESG).
+///
+/// It uses an authentication tag of 12 bytes (96 bits).
+/// The fixed prefix of the nonce is four bytes.
+pub type Aes128Gcm12Encrypter<'a> = AeadBaseEncrypter<'a, Aes128Gcm12>;
+
+/// An `Aes128Gcm12Decrypter` is a `QuicDecrypter`
+/// that implements the AEAD_AES_128_GCM_12 algorithm specified in RFC 5282.
+///
+/// Create an instance by calling QuicDecrypter::Create(kAESG).
+///
+/// It uses an authentication tag of 12 bytes (96 bits).
+/// The fixed prefix of the nonce is four bytes.
+pub type Aes128Gcm12Decrypter<'a> = AeadBaseDecrypter<'a, Aes128Gcm12>;
+
+/// A `ChaCha20Poly1305Encrypter` is a `QuicEncrypter`
+/// that implements the AEAD_CHACHA20_POLY1305 algorithm specified in RFC 7539,
+/// except that it truncates the Poly1305 authenticator to 12 bytes.
+///
+/// Create an instance by calling QuicEncrypter::Create(kCC12).
+///
+/// It uses an authentication tag of 16 bytes (128 bits).
+/// There is no fixed nonce prefix.
+pub type ChaCha20Poly1305Encrypter<'a> = AeadBaseEncrypter<'a, ChaCha20Poly1305>;
+
+/// A `ChaCha20Poly1305Decrypter` is a `QuicDecrypter`
+/// that implements the AEAD_CHACHA20_POLY1305 algorithm specified in draft-agl-tls-chacha20poly1305-04,
+/// except that it truncates the Poly1305 authenticator to 12 bytes.
+///
+/// Create an instance by calling QuicDecrypter::Create(kCC12).
+///
+/// It uses an authentication tag of 16 bytes (128 bits).
+/// There is no fixed nonce prefix.
+pub type ChaCha20Poly1305Decrypter<'a> = AeadBaseDecrypter<'a, ChaCha20Poly1305>;
+
+/// `AeadAlgorithm` implements the AEAD algorithm.
 pub trait AeadAlgorithm {
+    /// The name of algorithm.
+    fn name() -> &'static str;
+
+    /// The AEAD algorithm.
     fn algorithm() -> &'static Algorithm;
 }
 
+/// `Aes128Gcm12` implements the `AEAD_AES_128_GCM_12` algorithm specified in RFC 5282.
 pub struct Aes128Gcm12 {}
 
 impl AeadAlgorithm for Aes128Gcm12 {
+    fn name() -> &'static str {
+        "AES128_GCM12"
+    }
+
     fn algorithm() -> &'static Algorithm {
         &AES_128_GCM_TRUNCATED_TAG_96
     }
 }
 
+/// `ChaCha20Poly1305` implements the `AEAD_CHACHA20_POLY1305` algorithm specified in RFC 7539
 pub struct ChaCha20Poly1305 {}
 
 impl AeadAlgorithm for ChaCha20Poly1305 {
+    fn name() -> &'static str {
+        "AEAD_CHACHA20_POLY1305"
+    }
+
     fn algorithm() -> &'static Algorithm {
         &CHACHA_POLY1305_TRUNCATED_TAG_96
     }
 }
 
-pub struct AeadEncrypter<'a, A> {
+/// `AeadBaseEncrypter` is the base class of AEAD `QuicEncrypter` subclasses.
+pub struct AeadBaseEncrypter<'a, A> {
     key: Cow<'a, [u8]>,          // The key.
     nonce_prefix: Cow<'a, [u8]>, // The nonce prefix.
     phantom: PhantomData<A>,
 }
 
-impl<'a, A> AeadEncrypter<'a, A>
+impl<'a, A> AeadBaseEncrypter<'a, A>
 where
     A: AeadAlgorithm,
 {
-    pub fn new(key: &'a [u8], nonce_prefix: &'a [u8]) -> AeadEncrypter<'a, A> {
-        AeadEncrypter {
+    pub fn new(key: &'a [u8], nonce_prefix: &'a [u8]) -> AeadBaseEncrypter<'a, A> {
+        AeadBaseEncrypter {
             key: key.into(),
             nonce_prefix: nonce_prefix.into(),
             phantom: PhantomData,
@@ -69,7 +123,7 @@ where
     }
 }
 
-impl<'a, A> QuicEncrypter for AeadEncrypter<'a, A>
+impl<'a, A> QuicEncrypter for AeadBaseEncrypter<'a, A>
 where
     A: AeadAlgorithm,
 {
@@ -80,6 +134,8 @@ where
         associated_data: &[u8],
         plain_text: &[u8],
     ) -> Result<Bytes, Error> {
+        debug!("encrypt {} bytes data with {:?}", plain_text.len(), A::name());
+
         let mut nonce = self.nonce_prefix.as_ref().to_vec();
 
         nonce.put_u64::<NativeEndian>(packet_number);
@@ -92,18 +148,19 @@ where
     }
 }
 
-pub struct AeadDecrypter<'a, A> {
+/// `AeadBaseDecrypter` is the base class of AEAD `QuicDecrypter` subclasses.
+pub struct AeadBaseDecrypter<'a, A> {
     key: Cow<'a, [u8]>,          // The key.
     nonce_prefix: Cow<'a, [u8]>, // The nonce prefix.
     phantom: PhantomData<A>,
 }
 
-impl<'a, A> AeadDecrypter<'a, A>
+impl<'a, A> AeadBaseDecrypter<'a, A>
 where
     A: AeadAlgorithm,
 {
-    pub fn new(key: &'a [u8], nonce_prefix: &'a [u8]) -> AeadDecrypter<'a, A> {
-        AeadDecrypter {
+    pub fn new(key: &'a [u8], nonce_prefix: &'a [u8]) -> AeadBaseDecrypter<'a, A> {
+        AeadBaseDecrypter {
             key: key.into(),
             nonce_prefix: nonce_prefix.into(),
             phantom: PhantomData,
@@ -111,7 +168,7 @@ where
     }
 }
 
-impl<'a, A> QuicDecrypter for AeadDecrypter<'a, A>
+impl<'a, A> QuicDecrypter for AeadBaseDecrypter<'a, A>
 where
     A: 'static + AeadAlgorithm,
 {
@@ -128,7 +185,7 @@ where
         let (key, out) = out.split_at(self.key.len());
         let (nonce_prefix, _) = out.split_at(self.nonce_prefix.len());
 
-        Box::new(AeadDecrypter::<A> {
+        Box::new(AeadBaseDecrypter::<A> {
             key: key.to_owned().into(),
             nonce_prefix: nonce_prefix.to_owned().into(),
             phantom: PhantomData,
@@ -142,6 +199,8 @@ where
         associated_data: &[u8],
         cipher_text: &[u8],
     ) -> Result<Bytes, Error> {
+        debug!("decrypt {} bytes packet with {:?}", cipher_text.len(), A::name());
+
         let key = OpeningKey::new(A::algorithm(), self.key.as_ref())?;
         let mut nonce = self.nonce_prefix.as_ref().to_vec();
 
@@ -153,17 +212,13 @@ where
 
         let mut buf = cipher_text.to_vec();
 
-        let plain_text = open_in_place(&key, &nonce, associated_data, 0, &mut buf)?;
+        let size = open_in_place(&key, &nonce, associated_data, 0, &mut buf)?.len();
 
-        Ok(Bytes::from(plain_text.to_vec()))
+        buf.truncate(size);
+
+        Ok(Bytes::from(buf))
     }
 }
-
-pub type Aes128Gcm12Encrypter<'a> = AeadEncrypter<'a, Aes128Gcm12>;
-pub type Aes128Gcm12Decrypter<'a> = AeadDecrypter<'a, Aes128Gcm12>;
-
-pub type ChaCha20Poly1305Encrypter<'a> = AeadEncrypter<'a, ChaCha20Poly1305>;
-pub type ChaCha20Poly1305Decrypter<'a> = AeadDecrypter<'a, ChaCha20Poly1305>;
 
 #[allow(non_upper_case_globals)]
 #[cfg(test)]

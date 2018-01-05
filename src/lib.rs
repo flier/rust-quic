@@ -32,6 +32,6 @@ mod tag;
 mod version;
 mod sockaddr;
 mod frames;
-mod crypto;
+pub mod crypto;
 mod packet;
 mod framer;

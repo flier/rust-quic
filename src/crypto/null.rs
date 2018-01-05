@@ -7,7 +7,8 @@ use extprim::u128::u128;
 use failure::{Error, Fail};
 use nom::{IResult, le_u32, le_u64};
 
-use crypto::{QuicDecrypter, QuicEncrypter, fnv1a, kOffset};
+use crypto::{QuicDecrypter, QuicEncrypter};
+use crypto::fnv::{fnv1a, kOffset};
 use errors::QuicError;
 use packet::{QuicDiversificationNonce, QuicPacketNumber};
 use types::Perspective;
@@ -15,7 +16,8 @@ use version::QuicVersion;
 
 const kHashSizeShort: usize = 12; // size of uint128 serialized short
 
-/// A NullEncrypter is a QuicEncrypter used before a crypto negotiation has occurred.
+/// A `NullEncrypter` is a `QuicEncrypter` used before a crypto negotiation has occurred.
+///
 /// It does not actually encrypt the payload,
 /// but does generate a MAC (fnv128) over both the payload and associated data.
 #[derive(Clone, Debug)]
@@ -42,6 +44,8 @@ where
         associated_data: &[u8],
         plain_text: &[u8],
     ) -> Result<Bytes, Error> {
+        debug!("encrypt {} bytes data with FNV128", plain_text.len());
+
         let mut buf = BytesMut::with_capacity(kHashSizeShort + plain_text.len());
         let hash = compute_hash::<P>(version, associated_data, plain_text);
 
@@ -53,7 +57,8 @@ where
     }
 }
 
-/// A NullDecrypter is a QuicDecrypter used before a crypto negotiation has occurred.
+/// A `NullDecrypter` is a `QuicDecrypter` used before a crypto negotiation has occurred.
+///
 /// It does not actually decrypt the payload,
 /// but does verify a hash (fnv128) over both the payload and associated data.
 #[derive(Clone, Debug)]
@@ -84,6 +89,8 @@ where
         associated_data: &'p [u8],
         cipher_text: &'p [u8],
     ) -> Result<Bytes, Error> {
+        debug!("decrypt {} bytes packet with FNV128", cipher_text.len());
+
         let (plain_text, hash) = match read_hash(cipher_text) {
             IResult::Done(remaining, hash) => (remaining, hash),
             IResult::Incomplete(needed) => {
