@@ -14,7 +14,7 @@ bitflags = "1.0"
 extprim = "1.4"
 extprim_literals = "2.0"
 nom = "3.2"
-ring = "0.12"
+ring = { git = "https://github.com/flier/ring.git", branch = "with_auth_tag_len" }
 
 [dev-dependencies]
 pretty_env_logger = "0.1"

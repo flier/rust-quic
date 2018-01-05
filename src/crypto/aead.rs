@@ -1,3 +1,5 @@
+#![allow(non_upper_case_globals)]
+
 use std::iter;
 use std::marker::PhantomData;
 
@@ -12,6 +14,8 @@ use ring::hmac::SigningKey;
 use crypto::{QuicDecrypter, QuicEncrypter};
 use packet::{QuicDiversificationNonce, QuicPacketNumber};
 use version::QuicVersion;
+
+const kAuthTagSize: usize = 12;
 
 pub trait AeadAlgorithm {
     fn algorithm() -> &'static Algorithm;
@@ -52,13 +56,13 @@ where
     }
 
     fn encrypt(&self, nonce: &[u8], associated_data: &[u8], plain_text: &[u8]) -> Result<Bytes, Error> {
-        let key = SealingKey::new(A::algorithm(), &self.key)?;
-        let auth_tag_size = key.algorithm().tag_len();
+        let key = SealingKey::with_auth_tag_len(A::algorithm(), &self.key, kAuthTagSize)?;
+        let tag_len = key.algorithm().tag_len();
         let mut buf = plain_text.to_vec();
 
-        buf.extend(iter::repeat(0).take(auth_tag_size));
+        buf.extend(iter::repeat(0).take(tag_len));
 
-        let size = seal_in_place(&key, &nonce, associated_data, &mut buf, auth_tag_size)?;
+        let size = seal_in_place(&key, &nonce, associated_data, &mut buf, tag_len)?;
 
         Ok(Bytes::from(buf).split_to(size))
     }
@@ -79,11 +83,15 @@ where
 
         nonce.put_u64::<NativeEndian>(packet_number);
 
+        if nonce.len() != A::algorithm().nonce_len() {
+            bail!("nonce length mismatch: {}", nonce.len());
+        }
+
         self.encrypt(&nonce, associated_data, plain_text)
     }
 }
 
-struct AeadDecrypter<'a, A> {
+pub struct AeadDecrypter<'a, A> {
     key: &'a [u8],          // The key.
     nonce_prefix: &'a [u8], // The nonce prefix.
     phantom: PhantomData<A>,
@@ -130,12 +138,15 @@ where
         associated_data: &[u8],
         cipher_text: &[u8],
     ) -> Result<Bytes, Error> {
-        let key = OpeningKey::new(A::algorithm(), self.key)?;
+        let key = OpeningKey::with_auth_tag_len(A::algorithm(), self.key, kAuthTagSize)?;
         let mut nonce = BytesMut::from(self.nonce_prefix);
 
         nonce.put_u64::<NativeEndian>(packet_number);
 
-        let auth_tag_size = key.algorithm().tag_len();
+        if nonce.len() != A::algorithm().nonce_len() {
+            bail!("nonce length mismatch: {}", nonce.len());
+        }
+
         let mut buf = BytesMut::from(cipher_text);
 
         let plain_text = open_in_place(&key, &nonce, associated_data, 0, &mut buf)?;
@@ -480,6 +491,52 @@ mod tests {
         ),
     ];
 
+    const chacha_20_poly_1305_encrypt_test_groups: &[
+        // key, pt, iv, fixed, aad, ct
+        (&str, &str, &str, &str, &str, &str)
+    ] = &[
+        (
+            "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+            "4c616469657320616e642047656e746c656d656e206f662074686520636c617373206f66202739393a204966204920636f756c64206f6666657220796f75206f6e6c79206f6e652074697020666f7220746865206675747572652c2073756e73637265656e20776f756c642062652069742e",
+            "4041424344454647",
+            "07000000",
+            "50515253c0c1c2c3c4c5c6c7",
+            "d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d63dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b3692ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3ff4def08e4b7a9de576d26586cec64b61161ae10b594f09e26a7e902ecb",  // "d0600691" truncated
+        )
+    ];
+
+    const chacha_20_poly_1305_decrypt_test_groups: &[
+        // key, iv, fixed, aad, ct, pt
+        (&str, &str, &str, &str, &str, Option<&str>)
+    ] = &[
+        (
+            "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+            "4041424344454647",
+            "07000000",
+            "50515253c0c1c2c3c4c5c6c7",
+            "d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d63dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b3692ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3ff4def08e4b7a9de576d26586cec64b61161ae10b594f09e26a7e902ecb",  // "d0600691" truncated
+            Some("4c616469657320616e642047656e746c656d656e206f662074686520636c617373206f66202739393a204966204920636f756c64206f6666657220796f75206f6e6c79206f6e652074697020666f7220746865206675747572652c2073756e73637265656e20776f756c642062652069742e")
+        ),
+        // Modify the ciphertext (Poly1305 authenticator).
+        (
+            "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+            "4041424344454647",
+            "07000000",
+            "50515253c0c1c2c3c4c5c6c7",
+            "d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d63dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b3692ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3ff4def08e4b7a9de576d26586cec64b61161ae10b594f09e26a7e902ecc",  // "d0600691" truncated
+            None,
+        ),
+        // Modify the associated data.
+        (
+            "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+            "4041424344454647",
+            "07000000",
+            "60515253c0c1c2c3c4c5c6c7",
+            "d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d63dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b3692ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3ff4def08e4b7a9de576d26586cec64b61161ae10b594f09e26a7e902ecb",  // "d0600691" truncated
+            None,
+        )
+    ];
+
     #[test]
     fn test_aes_128_gcm_12_encrypter_encrypt() {
         for &((key_len, iv_len, pt_len, aad_len, tag_len), test_group) in aes_128_gcm_12_encrypt_test_groups {
@@ -498,11 +555,13 @@ mod tests {
                 assert_eq!(ct.len() * 8, pt_len);
                 assert_eq!(tag.len() * 8, tag_len);
 
+                assert!(tag.len() > kAuthTagSize);
+
                 let encrypter = Aes128Gcm12Encrypter::new(&key, b"");
                 let cipher_text = encrypter.encrypt(&iv, &aad, &pt).unwrap();
 
                 assert_eq!(&cipher_text[..ct.len()], ct.as_slice());
-                assert_eq!(&cipher_text[ct.len()..], tag.as_slice());
+                assert_eq!(&cipher_text[ct.len()..], &tag[..kAuthTagSize]);
             }
         }
     }
@@ -533,7 +592,7 @@ mod tests {
 
                 let mut cipher_text = ct.to_vec();
 
-                cipher_text.extend_from_slice(&tag);
+                cipher_text.extend_from_slice(&tag[..kAuthTagSize]);
 
                 let decrypter = Aes128Gcm12Decrypter::new(&key, nonce_prefix);
                 let plain_text = decrypter.decrypt_packet(
@@ -548,6 +607,54 @@ mod tests {
                 } else {
                     assert!(plain_text.is_err());
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn test_chacha_20_poly_1305_encrypter_encrypt() {
+        for &(key, pt, iv, fixed, aad, ct) in chacha_20_poly_1305_encrypt_test_groups {
+            let key = hex::decode(key).unwrap();
+            let pt = hex::decode(pt).unwrap();
+            let iv = hex::decode(iv).unwrap();
+            let fixed = hex::decode(fixed).unwrap();
+            let aad = hex::decode(aad).unwrap();
+            let ct = hex::decode(ct).unwrap();
+
+            let encrypter = ChaCha20Poly1305Encrypter::new(&key, b"");
+            let nonce = fixed.into_iter().chain(iv.into_iter()).collect::<Vec<u8>>();
+            let cipher_text = encrypter.encrypt(&nonce, &aad, &pt).unwrap();
+
+            assert_eq!(ct.len() - pt.len(), kAuthTagSize);
+            assert_eq!(cipher_text.len() - pt.len(), kAuthTagSize);
+            assert_eq!(cipher_text, &ct);
+        }
+    }
+
+    #[test]
+    fn test_chacha_20_poly_1305_encrypter_decrypt() {
+        for &(key, iv, fixed, aad, ct, pt) in chacha_20_poly_1305_decrypt_test_groups {
+            let key = hex::decode(key).unwrap();
+            let iv = hex::decode(iv).unwrap();
+            let fixed = hex::decode(fixed).unwrap();
+            let aad = hex::decode(aad).unwrap();
+            let ct = hex::decode(ct).unwrap();
+            let pt = pt.map(|pt| hex::decode(pt).unwrap());
+
+            let mut nonce = fixed;
+
+            nonce.extend_from_slice(&iv);
+
+            let (nonce_prefix, packet_number) = nonce.split_at(nonce.len() - mem::size_of::<QuicPacketNumber>());
+            let packet_number = NativeEndian::read_u64(packet_number);
+
+            let decrypter = ChaCha20Poly1305Decrypter::new(&key, &nonce_prefix);
+            let plain_text = decrypter.decrypt_packet(QuicVersion::QUIC_VERSION_41, packet_number, &aad, &ct);
+
+            if let Some(ref pt) = pt {
+                assert_eq!(plain_text.unwrap(), pt);
+            } else {
+                assert!(plain_text.is_err());
             }
         }
     }
