@@ -1,3 +1,4 @@
+use std::cmp;
 use std::mem;
 use std::time::Instant;
 
@@ -6,6 +7,7 @@ use bytes::Bytes;
 use failure::{Error, ResultExt};
 use nom::IResult;
 
+use constants::kMaxPacketSize;
 use crypto::{CryptoHandshakeMessage, NullDecrypter, QuicDecrypter, kCADR, kPRST, kRNON};
 use errors::QuicError;
 use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketNumber, QuicPacketPublicHeader,
@@ -35,11 +37,18 @@ pub trait QuicFramerVisitor {
     fn on_public_reset_packet(&self, packet: QuicPublicResetPacket);
 
     /// Called when the unauthenticated portion of the header has been parsed.
-    /// If OnUnauthenticatedHeader returns false, framing for this packet will cease.
+    /// If `on_unauthenticated_header` returns false, framing for this packet will cease.
     fn on_unauthenticated_header(&self, header: &QuicPacketHeader) -> bool;
 
     /// Called when a packet has been decrypted. `level` is the encryption level of the packet.
     fn on_decrypted_packet(&self, level: EncryptionLevel);
+
+    /// Called when the complete header of a packet had been parsed.
+    /// If `on_packet_header` returns false, framing for this packet will cease.
+    fn on_packet_header(&self, header: &QuicPacketHeader) -> bool;
+
+    /// Called when a packet has been completely processed.
+    fn on_packet_complete(&self);
 }
 
 /// Class for parsing and constructing QUIC packets.
@@ -237,7 +246,26 @@ where
             bail!("Visitor asked to stop processing of unauthenticated header.")
         }
 
-        let payload = self.decrypt_payload::<P>(remaining, header, packet)?;
+        let payload = self.decrypt_payload::<P>(remaining, &header, packet)
+            .context("Unable to decrypt payload.")?;
+
+        // Set the last packet number after we have decrypted the packet
+        // so we are confident is not attacker controlled.
+        self.set_last_packet_number(&header);
+
+        if !self.visitor.on_packet_header(&header) {
+            // The visitor suppresses further processing of the packet.
+            return Ok(());
+        }
+
+        if packet.len() > kMaxPacketSize {
+            bail!(QuicError::PacketTooLarge(packet.len()));
+        }
+
+        // Handle the payload.
+        self.process_frame_data(&payload, header)?;
+
+        self.visitor.on_packet_complete();
 
         Ok(())
     }
@@ -323,7 +351,7 @@ where
     fn decrypt_payload<'p, P>(
         &mut self,
         input: &'p [u8],
-        header: QuicPacketHeader,
+        header: &'p QuicPacketHeader,
         packet: &'p EncryptedPacket,
     ) -> Result<Bytes, Error>
     where
@@ -346,25 +374,28 @@ where
             let try_alternative_decryption = self.alternative_decrypter_level != EncryptionLevel::Initial
                 || P::is_server() || header.public_header.nonce.is_some();
 
-            if let Ok(decrypted) = decrypter.decrypt_packet(
-                self.quic_version,
-                header.packet_number,
-                associated_data,
-                input,
-            ) {
-                self.visitor
-                    .on_decrypted_packet(self.alternative_decrypter_level);
+            if try_alternative_decryption {
+                if let Ok(decrypted) = decrypter.decrypt_packet(
+                    self.quic_version,
+                    header.packet_number,
+                    associated_data,
+                    input,
+                ) {
+                    self.visitor
+                        .on_decrypted_packet(self.alternative_decrypter_level);
 
-                if self.alternative_decrypter_latch {
-                    self.decrypter = decrypter;
-                    self.decrypter_level = self.alternative_decrypter_level;
-                    self.alternative_decrypter_level = EncryptionLevel::None;
-                } else {
-                    self.alternative_decrypter = Some(mem::replace(&mut self.decrypter, decrypter));
-                    self.decrypter_level = mem::replace(&mut self.alternative_decrypter_level, self.decrypter_level);
+                    if self.alternative_decrypter_latch {
+                        self.decrypter = decrypter;
+                        self.decrypter_level = self.alternative_decrypter_level;
+                        self.alternative_decrypter_level = EncryptionLevel::None;
+                    } else {
+                        self.alternative_decrypter = Some(mem::replace(&mut self.decrypter, decrypter));
+                        self.decrypter_level =
+                            mem::replace(&mut self.alternative_decrypter_level, self.decrypter_level);
+                    }
+
+                    return Ok(decrypted);
                 }
-
-                return Ok(decrypted);
             }
         }
 
@@ -380,6 +411,15 @@ where
         packet: &'p EncryptedPacket,
     ) -> &'p [u8] {
         &packet.as_bytes()[..header.size()]
+    }
+
+    fn set_last_packet_number(&mut self, header: &QuicPacketHeader) {
+        self.last_packet_number = header.packet_number;
+        self.largest_packet_number = cmp::max(self.largest_packet_number, header.packet_number);
+    }
+
+    fn process_frame_data(&self, payload: &[u8], header: QuicPacketHeader) -> Result<(), Error> {
+        Ok(())
     }
 }
 

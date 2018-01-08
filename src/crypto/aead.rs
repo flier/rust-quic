@@ -1,13 +1,14 @@
 #![allow(non_upper_case_globals)]
 
-use std::iter;
 use std::borrow::Cow;
+use std::iter;
 use std::marker::PhantomData;
 
 use byteorder::NativeEndian;
 use bytes::{BufMut, Bytes};
 use failure::Error;
-use ring::aead::{open_in_place, seal_in_place, AES_128_GCM_TRUNCATED_TAG_96, Algorithm, CHACHA_POLY1305_TRUNCATED_TAG_96 , OpeningKey, SealingKey};
+use ring::aead::{open_in_place, seal_in_place, AES_128_GCM_TRUNCATED_TAG_96, Algorithm,
+                 CHACHA_POLY1305_TRUNCATED_TAG_96, OpeningKey, SealingKey};
 use ring::digest::SHA256;
 use ring::hkdf::extract_and_expand;
 use ring::hmac::SigningKey;
@@ -129,12 +130,16 @@ where
 {
     fn encrypt_packet<'p>(
         &self,
-        version: QuicVersion,
+        _version: QuicVersion,
         packet_number: QuicPacketNumber,
         associated_data: &[u8],
         plain_text: &[u8],
     ) -> Result<Bytes, Error> {
-        debug!("encrypt {} bytes data with {:?}", plain_text.len(), A::name());
+        debug!(
+            "encrypt {} bytes data with {:?}",
+            plain_text.len(),
+            A::name()
+        );
 
         let mut nonce = self.nonce_prefix.as_ref().to_vec();
 
@@ -194,12 +199,16 @@ where
 
     fn decrypt_packet(
         &self,
-        version: QuicVersion,
+        _version: QuicVersion,
         packet_number: QuicPacketNumber,
         associated_data: &[u8],
         cipher_text: &[u8],
     ) -> Result<Bytes, Error> {
-        debug!("decrypt {} bytes packet with {:?}", cipher_text.len(), A::name());
+        debug!(
+            "decrypt {} bytes packet with {:?}",
+            cipher_text.len(),
+            A::name()
+        );
 
         let key = OpeningKey::new(A::algorithm(), self.key.as_ref())?;
         let mut nonce = self.nonce_prefix.as_ref().to_vec();

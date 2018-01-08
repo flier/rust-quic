@@ -9,17 +9,9 @@ use bytes::Bytes;
 use failure::{Error, Fail};
 use nom::{Endianness, IResult, Needed, be_u64, be_u8};
 
+use constants::{kPublicFlagsSize, kQuicVersionSize};
 use errors::QuicError;
 use version::QuicVersion;
-
-/// Number of bytes reserved for public flags in the packet header.
-const kPublicFlagsSize: usize = 1;
-/// Number of bytes reserved for version number in the packet header.
-const kQuicVersionSize: usize = 4;
-/// Number of bytes reserved for path id in the packet header.
-const kQuicPathIdSize: usize = 1;
-/// Number of bytes reserved for private flags in the packet header.
-const kPrivateFlagsSize: usize = 1;
 
 const kPublicHeaderConnectionIdSize: usize = 8;
 
@@ -107,7 +99,7 @@ impl<'a> QuicPacketPublicHeader<'a> {
     where
         E: ByteOrder + ToEndianness,
     {
-        match parse_public_header(buf, E::endianness(), is_server) {
+        match parse_public_header(buf, is_server) {
             IResult::Done(remaining, public_header) => Ok((remaining, public_header)),
             IResult::Incomplete(needed) => {
                 bail!(QuicError::IncompletePacket(needed).context("incomplete public header."))
@@ -193,7 +185,7 @@ pub type QuicVersionNegotiationPacket<'a> = QuicPacketPublicHeader<'a>;
 
 /// Recognizes big endian unsigned 8 bytes integer
 #[inline]
-pub fn be_u48(i: &[u8]) -> IResult<&[u8], u64> {
+fn be_u48(i: &[u8]) -> IResult<&[u8], u64> {
     if i.len() < 6 {
         IResult::Incomplete(Needed::Size(6))
     } else {
@@ -205,7 +197,7 @@ pub fn be_u48(i: &[u8]) -> IResult<&[u8], u64> {
 
 /// Recognizes little endian unsigned 8 bytes integer
 #[inline]
-pub fn le_u48(i: &[u8]) -> IResult<&[u8], u64> {
+fn le_u48(i: &[u8]) -> IResult<&[u8], u64> {
     if i.len() < 6 {
         IResult::Incomplete(Needed::Size(6))
     } else {
@@ -218,7 +210,7 @@ pub fn le_u48(i: &[u8]) -> IResult<&[u8], u64> {
 #[macro_export]
 macro_rules! u48 ( ($i:expr, $e:expr) => ( {if Endianness::Big == $e { be_u48($i) } else { le_u48($i) } } ););
 
-named_args!(parse_public_header(endianness: Endianness, is_server: bool)<QuicPacketPublicHeader>,
+named_args!(parse_public_header(is_server: bool)<QuicPacketPublicHeader>,
     do_parse!(
         public_flags: map!(call!(be_u8), PublicFlags::from_bits_truncate) >>
 
@@ -267,13 +259,13 @@ mod tests {
     #[test]
     fn test_parse_public_header() {
         assert_matches!(
-            parse_public_header(b"", Endianness::Little, true),
+            parse_public_header(b"", true),
             IResult::Incomplete(Needed::Size(1))
         );
 
         // public flags (8 byte connection_id and 4 byte packet number)
         assert_matches!(
-            parse_public_header(&[0x38], Endianness::Little, true),
+            parse_public_header(&[0x38], true),
             IResult::Incomplete(Needed::Size(9))
         );
 
@@ -298,7 +290,7 @@ mod tests {
         ];
 
         assert_eq!(
-            parse_public_header(&packet38, Endianness::Little, true),
+            parse_public_header(&packet38, true),
             IResult::Done(
                 &[0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12][..],
                 QuicPacketPublicHeader {
@@ -312,7 +304,7 @@ mod tests {
         );
 
         assert_eq!(
-            parse_public_header(&packet39, Endianness::Big, true),
+            parse_public_header(&packet39, true),
             IResult::Done(
                 &[0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC][..],
                 QuicPacketPublicHeader {

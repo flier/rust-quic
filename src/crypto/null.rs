@@ -78,14 +78,14 @@ impl<P> QuicDecrypter for NullDecrypter<P>
 where
     P: 'static + Perspective,
 {
-    fn with_preliminary_key(self, nonce: &QuicDiversificationNonce) -> Box<QuicDecrypter> {
+    fn with_preliminary_key(self, _nonce: &QuicDiversificationNonce) -> Box<QuicDecrypter> {
         Box::new(self)
     }
 
     fn decrypt_packet<'p>(
         &self,
         version: QuicVersion,
-        packet_number: QuicPacketNumber,
+        _packet_number: QuicPacketNumber,
         associated_data: &'p [u8],
         cipher_text: &'p [u8],
     ) -> Result<Bytes, Error> {

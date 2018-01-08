@@ -26,6 +26,7 @@ extern crate matches;
 extern crate pretty_env_logger;
 
 mod errors;
+mod constants;
 mod types;
 #[macro_use]
 mod tag;
@@ -35,3 +36,5 @@ mod frames;
 pub mod crypto;
 mod packet;
 mod framer;
+
+pub use framer::{QuicFramer, QuicFramerVisitor};

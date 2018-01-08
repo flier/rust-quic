@@ -8,6 +8,8 @@ pub enum QuicError {
 
     #[fail(display = "invalid packet, {}", _0)] InvalidPacket(#[cause] nom::Err),
 
+    #[fail(display = "packet too large, {}", _0)] PacketTooLarge(usize),
+
     #[fail(display = "unsupported version: {:?}", _0)] UnsupportedVersion(QuicTag),
 
     #[fail(display = "parameter not found: {:?}", _0)] ParamNotFound(QuicTag),
