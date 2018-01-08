@@ -4,14 +4,15 @@ use std::net::SocketAddr;
 use std::ops::Deref;
 use std::str::FromStr;
 
-use byteorder::{BigEndian, ByteOrder, LittleEndian};
+use byteorder::{ByteOrder};
 use bytes::Bytes;
 use failure::{Error, Fail};
-use nom::{Endianness, IResult, Needed, be_u64, be_u8};
+use nom::{IResult, Needed, be_u64, be_u8};
 
 use constants::{kPublicFlagsSize, kQuicVersionSize};
 use errors::QuicError;
-use version::QuicVersion;
+use types::{QuicConnectionId, ToEndianness, QuicDiversificationNonce, QuicPacketNumber, QuicPublicResetNonceProof};
+use version::{QuicVersion};
 
 const kPublicHeaderConnectionIdSize: usize = 8;
 
@@ -80,11 +81,6 @@ bitflags! {
     }
 }
 
-pub type QuicConnectionId = u64;
-pub type QuicDiversificationNonce = [u8; 32];
-pub type QuicPublicResetNonceProof = u64;
-pub type QuicPacketNumber = u64;
-
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct QuicPacketPublicHeader<'a> {
     pub reset_flag: bool,
@@ -143,22 +139,6 @@ pub struct QuicPublicResetPacket<'a> {
     pub public_header: QuicPacketPublicHeader<'a>,
     pub nonce_proof: QuicPublicResetNonceProof,
     pub client_address: Option<SocketAddr>,
-}
-
-pub trait ToEndianness {
-    fn endianness() -> Endianness;
-}
-
-impl ToEndianness for LittleEndian {
-    fn endianness() -> Endianness {
-        Endianness::Little
-    }
-}
-
-impl ToEndianness for BigEndian {
-    fn endianness() -> Endianness {
-        Endianness::Big
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -251,7 +231,7 @@ named!(pub quic_version<QuicVersion>, map_res!(take_str!(4), FromStr::from_str))
 #[cfg(test)]
 mod tests {
     use super::*;
-    use packet::{QuicConnectionId, QuicPacketNumber};
+    use types::{QuicConnectionId, QuicPacketNumber};
 
     const kConnectionId: QuicConnectionId = 0xFEDCBA9876543210;
     const kPacketNumber: QuicPacketNumber = 0x123456789ABC;

@@ -10,8 +10,7 @@ use nom::{IResult, le_u32, le_u64};
 use crypto::{QuicDecrypter, QuicEncrypter};
 use crypto::fnv::{fnv1a, kOffset};
 use errors::QuicError;
-use packet::{QuicDiversificationNonce, QuicPacketNumber};
-use types::Perspective;
+use types::{Perspective, QuicDiversificationNonce, QuicPacketNumber};
 use version::QuicVersion;
 
 const kHashSizeShort: usize = 12; // size of uint128 serialized short
@@ -40,7 +39,7 @@ where
     fn encrypt_packet<'p>(
         &self,
         version: QuicVersion,
-        packet_number: QuicPacketNumber,
+        _packet_number: QuicPacketNumber,
         associated_data: &[u8],
         plain_text: &[u8],
     ) -> Result<Bytes, Error> {

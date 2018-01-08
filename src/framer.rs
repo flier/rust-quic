@@ -10,11 +10,12 @@ use nom::IResult;
 use constants::kMaxPacketSize;
 use crypto::{CryptoHandshakeMessage, NullDecrypter, QuicDecrypter, kCADR, kPRST, kRNON};
 use errors::QuicError;
-use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketNumber, QuicPacketPublicHeader,
-             QuicPublicResetPacket, QuicVersionNegotiationPacket, ToEndianness};
+use frames::{is_stream_frame, QuicStreamFrame, kQuicFrameTypeSpecialMask};
+use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketPublicHeader, QuicPublicResetPacket,
+             QuicVersionNegotiationPacket};
 use sockaddr::socket_address;
-use types::{EncryptionLevel, Perspective};
-use version::QuicVersion;
+use types::{EncryptionLevel, Perspective, QuicPacketNumber, ToEndianness};
+use version::{QuicVersion};
 
 pub trait QuicFramerVisitor {
     /// Called when a new packet has been received, before it has been validated or processed.
@@ -46,6 +47,9 @@ pub trait QuicFramerVisitor {
     /// Called when the complete header of a packet had been parsed.
     /// If `on_packet_header` returns false, framing for this packet will cease.
     fn on_packet_header(&self, header: &QuicPacketHeader) -> bool;
+
+    /// Called when a `QuicStreamFrame` has been parsed.
+    fn on_stream_frame(&self, frame: QuicStreamFrame) -> bool;
 
     /// Called when a packet has been completely processed.
     fn on_packet_complete(&self);
@@ -238,7 +242,7 @@ where
     ) -> Result<(), Error>
     where
         P: Perspective,
-        E: ByteOrder,
+        E: ByteOrder + ToEndianness,
     {
         let (remaining, header) = self.process_unauthenticated_header::<E>(input, public_header)?;
 
@@ -418,8 +422,32 @@ where
         self.largest_packet_number = cmp::max(self.largest_packet_number, header.packet_number);
     }
 
-    fn process_frame_data(&self, payload: &[u8], header: QuicPacketHeader) -> Result<(), Error> {
+    fn process_frame_data(&self, payload: &[u8], header: QuicPacketHeader) -> Result<(), Error>
+    {
+        while let Some((frame_type, remaining)) = payload.split_first() {
+            let frame_type = *frame_type;
+
+            if (frame_type & kQuicFrameTypeSpecialMask) == 0 {
+                bail!(QuicError::InvalidFrameType(frame_type));
+            }
+
+            if is_stream_frame(self.quic_version, frame_type) {
+                let frame = self.process_stream_frame(remaining, frame_type)?;
+
+                if !self.visitor.on_stream_frame(frame) {
+                    debug!("Visitor asked to stop further processing.");
+
+                    return Ok(());
+                }
+            }
+        }
+
         Ok(())
+    }
+
+    fn process_stream_frame<'p>(&self, payload: &'p [u8], frame_type: u8) -> Result<QuicStreamFrame<'p>, Error>
+    {
+        QuicStreamFrame::parse(self.quic_version, frame_type, payload)
     }
 }
 

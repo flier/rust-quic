@@ -1,4 +1,4 @@
-#![allow(non_upper_case_globals)]
+#![allow(dead_code, non_upper_case_globals)]
 
 /// The maximum packet size of any QUIC packet, based on ethernet's max size,
 /// minus the IP and UDP headers. IPv6 has a 40 byte header, UDP adds an

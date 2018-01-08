@@ -2,7 +2,7 @@ use failure::Error;
 
 use bytes::Bytes;
 
-use packet::{QuicDiversificationNonce, QuicPacketNumber};
+use types::{QuicDiversificationNonce, QuicPacketNumber};
 use version::QuicVersion;
 
 /// `QuicDecrypter` implements the QUIC decrypter

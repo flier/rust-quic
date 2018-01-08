@@ -10,11 +10,13 @@ pub enum QuicError {
 
     #[fail(display = "packet too large, {}", _0)] PacketTooLarge(usize),
 
-    #[fail(display = "unsupported version: {:?}", _0)] UnsupportedVersion(QuicTag),
+    #[fail(display = "unsupported version, {:?}", _0)] UnsupportedVersion(QuicTag),
 
-    #[fail(display = "parameter not found: {:?}", _0)] ParamNotFound(QuicTag),
+    #[fail(display = "parameter not found, {:?}", _0)] ParamNotFound(QuicTag),
 
-    #[fail(display = "invalid parameter: {:?}", _0)] InvalidParam(QuicTag),
+    #[fail(display = "invalid parameter, {:?}", _0)] InvalidParam(QuicTag),
+
+    #[fail(display = "invalid frame type, {}", _0)] InvalidFrameType(u8),
 }
 
 impl From<IError> for QuicError {

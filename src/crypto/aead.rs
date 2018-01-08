@@ -14,7 +14,7 @@ use ring::hkdf::extract_and_expand;
 use ring::hmac::SigningKey;
 
 use crypto::{QuicDecrypter, QuicEncrypter};
-use packet::{QuicDiversificationNonce, QuicPacketNumber};
+use types::{QuicDiversificationNonce, QuicPacketNumber};
 use version::QuicVersion;
 
 const kAuthTagSize: usize = 12;

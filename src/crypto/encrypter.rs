@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use failure::Error;
 
-use packet::QuicPacketNumber;
+use types::QuicPacketNumber;
 use version::QuicVersion;
 
 /// `QuicEncrypter` implements the QUIC encrypter

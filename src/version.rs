@@ -3,9 +3,12 @@
 use std::str::FromStr;
 
 use failure::Error;
+use nom::Endianness;
+use byteorder::{NativeEndian, NetworkEndian};
 
 use errors::QuicError;
 use tag::QuicTag;
+use types::ToEndianness;
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub enum QuicVersion {
@@ -25,6 +28,16 @@ pub enum QuicVersion {
     QUIC_VERSION_40 = 40,
     /// Use IETF packet header format.
     QUIC_VERSION_41 = 41,
+}
+
+impl QuicVersion {
+    pub fn endianness(self) -> Endianness {
+        if self > QuicVersion::QUIC_VERSION_38 {
+            NetworkEndian::endianness()
+        } else {
+            NativeEndian::endianness()
+        }
+    }
 }
 
 impl From<QuicVersion> for QuicTag {
