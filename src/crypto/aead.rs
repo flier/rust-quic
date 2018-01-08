@@ -172,8 +172,8 @@ impl<'a, A> QuicDecrypter for AeadBaseDecrypter<'a, A>
 where
     A: 'static + AeadAlgorithm,
 {
-    fn with_preliminary_key(self, nonce: QuicDiversificationNonce) -> Box<QuicDecrypter> {
-        let salt = SigningKey::new(&SHA256, &nonce[..]);
+    fn with_preliminary_key(self, nonce: &QuicDiversificationNonce) -> Box<QuicDecrypter> {
+        let salt = SigningKey::new(&SHA256, nonce);
         let mut secret = self.key.to_vec();
 
         secret.extend_from_slice(&self.nonce_prefix);

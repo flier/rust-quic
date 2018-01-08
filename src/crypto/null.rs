@@ -78,7 +78,7 @@ impl<P> QuicDecrypter for NullDecrypter<P>
 where
     P: 'static + Perspective,
 {
-    fn with_preliminary_key(self, nonce: QuicDiversificationNonce) -> Box<QuicDecrypter> {
+    fn with_preliminary_key(self, nonce: &QuicDiversificationNonce) -> Box<QuicDecrypter> {
         Box::new(self)
     }
 

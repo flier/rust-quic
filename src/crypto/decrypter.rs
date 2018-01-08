@@ -12,7 +12,7 @@ pub trait QuicDecrypter {
     /// `decrypt_packet` may not be called until `with_preliminary_key` is called and
     /// the preliminary keying material will be combined with that nonce in order to
     /// create the actual key and nonce-prefix.
-    fn with_preliminary_key(self, nonce: QuicDiversificationNonce) -> Box<QuicDecrypter>;
+    fn with_preliminary_key(self, nonce: &QuicDiversificationNonce) -> Box<QuicDecrypter>;
 
     /// Populates `output` with the decrypted `cipher_text`.
     /// `packet_number` is appended to the `nonce_prefix` value provided in `set_nonce_prefix` to form the nonce.
