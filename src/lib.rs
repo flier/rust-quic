@@ -28,11 +28,8 @@ extern crate pretty_env_logger;
 
 mod errors;
 mod constants;
-mod types;
 #[macro_use]
-mod tag;
-mod version;
-mod sockaddr;
+mod types;
 #[macro_use]
 mod packet;
 pub mod crypto;

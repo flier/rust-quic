@@ -7,8 +7,7 @@ use failure::Error;
 use nom::Endianness;
 
 use errors::QuicError;
-use tag::QuicTag;
-use types::ToEndianness;
+use types::{QuicTag, ToEndianness};
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub enum QuicVersion {

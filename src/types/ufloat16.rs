@@ -151,7 +151,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_from_ufloat16() {
+    fn from_ufloat16() {
         const test_cases: &[(u64, u16)] = &[
             // There are fewer decoding test cases because encoding truncates, and
             // decoding returns the smallest expansion.
@@ -209,7 +209,7 @@ mod tests {
     }
 
     #[test]
-    fn test_to_ufloat16() {
+    fn to_ufloat16() {
         const test_cases: &[(u64, u16)] = &[
             // Small numbers represent themselves.
             (0, 0),

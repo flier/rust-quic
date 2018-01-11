@@ -15,7 +15,7 @@ use ring::hmac::SigningKey;
 
 use crypto::{QuicDecrypter, QuicEncrypter};
 use types::{QuicDiversificationNonce, QuicPacketNumber};
-use version::QuicVersion;
+use types::QuicVersion;
 
 const kAuthTagSize: usize = 12;
 
@@ -606,7 +606,7 @@ mod tests {
     ];
 
     #[test]
-    fn test_aes_128_gcm_12_encrypter_encrypt() {
+    fn aes_128_gcm_12_encrypter_encrypt() {
         for &((key_len, iv_len, pt_len, aad_len, tag_len), test_group) in aes_128_gcm_12_encrypt_test_groups {
             for &(key, iv, pt, aad, ct, tag) in test_group {
                 let key = hex::decode(key).unwrap();
@@ -635,7 +635,7 @@ mod tests {
     }
 
     #[test]
-    fn test_aes_128_gcm_12_decrypter_decrypt() {
+    fn aes_128_gcm_12_decrypter_decrypt() {
         for &((key_len, iv_len, pt_len, aad_len, tag_len), test_group) in aes_128_gcm_12_decrypt_test_groups {
             for &(key, iv, ct, aad, tag, pt) in test_group {
                 let key = hex::decode(key).unwrap();
@@ -680,7 +680,7 @@ mod tests {
     }
 
     #[test]
-    fn test_chacha_20_poly_1305_encrypter_encrypt() {
+    fn chacha_20_poly_1305_encrypter_encrypt() {
         for &(key, pt, iv, fixed, aad, ct) in chacha_20_poly_1305_encrypt_test_groups {
             let key = hex::decode(key).unwrap();
             let pt = hex::decode(pt).unwrap();
@@ -700,7 +700,7 @@ mod tests {
     }
 
     #[test]
-    fn test_chacha_20_poly_1305_encrypter_decrypt() {
+    fn chacha_20_poly_1305_encrypter_decrypt() {
         for &(key, iv, fixed, aad, ct, pt) in chacha_20_poly_1305_decrypt_test_groups {
             let key = hex::decode(key).unwrap();
             let iv = hex::decode(iv).unwrap();

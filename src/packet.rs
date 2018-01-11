@@ -12,7 +12,7 @@ use nom::{IResult, Needed, be_u64, be_u8};
 use constants::{kPublicFlagsSize, kQuicVersionSize};
 use errors::QuicError;
 use types::{QuicConnectionId, QuicDiversificationNonce, QuicPacketNumber, QuicPublicResetNonceProof, ToEndianness};
-use version::QuicVersion;
+use types::QuicVersion;
 
 const kPublicHeaderConnectionIdSize: usize = 8;
 
@@ -112,8 +112,8 @@ impl<'a> QuicPacketPublicHeader<'a> {
     where
         E: ByteOrder + ToEndianness,
     {
-        match parse_public_header(buf, is_server) {
-            IResult::Done(remaining, public_header) => Ok((remaining, public_header)),
+        match public_header(buf, is_server) {
+            IResult::Done(remaining, header) => Ok((remaining, header)),
             IResult::Incomplete(needed) => {
                 bail!(QuicError::IncompletePacket(needed).context("incomplete public header."))
             }
@@ -239,7 +239,7 @@ macro_rules! uint (
     );
 );
 
-named_args!(parse_public_header(is_server: bool)<QuicPacketPublicHeader>,
+named_args!(public_header(is_server: bool)<QuicPacketPublicHeader>,
     do_parse!(
         public_flags: map!(call!(be_u8), PublicFlags::from_bits_truncate) >>
 
@@ -286,15 +286,15 @@ mod tests {
     const kPacketNumber: QuicPacketNumber = 0x123456789ABC;
 
     #[test]
-    fn test_parse_public_header() {
+    fn parse_public_header() {
         assert_matches!(
-            parse_public_header(b"", true),
+            public_header(b"", true),
             IResult::Incomplete(Needed::Size(1))
         );
 
         // public flags (8 byte connection_id and 4 byte packet number)
         assert_matches!(
-            parse_public_header(&[0x38], true),
+            public_header(&[0x38], true),
             IResult::Incomplete(Needed::Size(9))
         );
 
@@ -319,7 +319,7 @@ mod tests {
         ];
 
         assert_eq!(
-            parse_public_header(&packet38, true),
+            public_header(&packet38, true),
             IResult::Done(
                 &[0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12][..],
                 QuicPacketPublicHeader {
@@ -333,7 +333,7 @@ mod tests {
         );
 
         assert_eq!(
-            parse_public_header(&packet39, true),
+            public_header(&packet39, true),
             IResult::Done(
                 &[0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC][..],
                 QuicPacketPublicHeader {

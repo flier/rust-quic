@@ -1,6 +1,6 @@
 #![allow(dead_code, non_upper_case_globals)]
 
-use tag::QuicTag;
+use types::QuicTag;
 
 /// Client hello
 pub const kCHLO: QuicTag = quic_tag!(b"CHLO");

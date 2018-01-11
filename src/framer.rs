@@ -1,10 +1,13 @@
+#![allow(non_upper_case_globals)]
+
 use std::cmp;
 use std::mem;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 use byteorder::{ByteOrder, NativeEndian, NetworkEndian};
 use bytes::Bytes;
 use failure::{Error, ResultExt};
-use nom::IResult;
+use nom::{IResult, le_u16};
 
 use constants::kMaxPacketSize;
 use crypto::{CryptoHandshakeMessage, NullDecrypter, QuicDecrypter, kCADR, kPRST, kRNON};
@@ -12,9 +15,8 @@ use errors::QuicError;
 use frames::{is_ack_frame, is_stream_frame, QuicAckFrame, QuicStreamFrame, kQuicFrameTypeSpecialMask};
 use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketPublicHeader, QuicPublicResetPacket,
              QuicVersionNegotiationPacket};
-use sockaddr::socket_address;
-use types::{EncryptionLevel, Perspective, QuicPacketNumber, QuicTime, QuicTimeDelta, ToEndianness, ToQuicPacketNumber};
-use version::QuicVersion;
+use types::{EncryptionLevel, Perspective, QuicPacketNumber, QuicTime, QuicTimeDelta, QuicVersion, ToEndianness,
+            ToQuicPacketNumber};
 
 pub trait QuicFramerVisitor {
     /// Called when a new packet has been received, before it has been validated or processed.
@@ -237,7 +239,7 @@ where
             public_header,
             nonce_proof: message.get_u64(kRNON)?,
             client_address: message.get_bytes(kCADR).and_then(|s| {
-                if let IResult::Done(_, addr) = socket_address(s) {
+                if let IResult::Done(_, addr) = parse_socket_address(s) {
                     addr
                 } else {
                     None
@@ -451,4 +453,33 @@ where
 named!(
     parse_version_negotiation_packet<Vec<QuicVersion>>,
     many1!(quic_version)
+);
+
+/// For convenience, the values of these constants match the values of AF_INET and AF_INET6 on Linux.
+const kIPv4: u16 = 2;
+const kIPv6: u16 = 10;
+
+const kIPv4AddressSize: usize = 4;
+const kIPv6AddressSize: usize = 16;
+
+named!(
+    parse_socket_address<Option<SocketAddr>>,
+    do_parse!(
+        address_family: le_u16
+            >> ip:
+                switch!(value!(address_family),
+        kIPv4 => take!(kIPv4AddressSize) |
+        kIPv6 => take!(kIPv6AddressSize)
+    ) >> port: le_u16 >> (match address_family {
+            kIPv4 => Some(SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::from(*array_ref!(ip, 0, kIPv4AddressSize))),
+                port
+            )),
+            kIPv6 => Some(SocketAddr::new(
+                IpAddr::V6(Ipv6Addr::from(*array_ref!(ip, 0, kIPv6AddressSize))),
+                port
+            )),
+            _ => None,
+        })
+    )
 );

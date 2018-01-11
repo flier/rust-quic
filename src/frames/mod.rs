@@ -20,7 +20,7 @@ mod ack;
 pub use self::ack::{PacketNumberQueue, QuicAckFrame};
 pub use self::stream::QuicStreamFrame;
 
-use version::QuicVersion;
+use types::QuicVersion;
 
 // New Frame Types, QUIC v. >= 10:
 // There are two interpretations for the Frame Type byte in the QUIC protocol,

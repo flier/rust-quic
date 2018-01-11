@@ -7,8 +7,7 @@ use nom::{self, IResult};
 
 use errors::QuicError;
 use frames::{kQuicFrameTypeStreamMask, kQuicFrameTypeStreamMask_Pre40};
-use types::{QuicStreamId, QuicStreamOffset};
-use version::QuicVersion;
+use types::{QuicStreamId, QuicStreamOffset, QuicVersion};
 
 // Stream type format is 11FSSOOD.
 // Stream frame relative shifts and masks for interpreting the stream flags.
@@ -134,7 +133,7 @@ mod tests {
     const kStreamOffset: QuicStreamOffset = 0xBA98FEDC32107654;
 
     #[test]
-    fn test_parse_quic_stream_frame() {
+    fn parse_frame() {
         const packet: &[u8] = &[
             // stream id
             0x04, 0x03, 0x02, 0x01,

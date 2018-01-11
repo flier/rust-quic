@@ -58,9 +58,10 @@ impl fmt::Display for QuicTag {
     }
 }
 
+#[macro_export]
 macro_rules! quic_tag {
     ($s:expr) => {
-        $crate::tag::QuicTag(
+        $crate::types::QuicTag(
             (($s[3] as u32) << 24) +
             (($s[2] as u32) << 16) +
             (($s[1] as u32) << 8) +
@@ -77,14 +78,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_quic_tag() {
+    fn tag() {
         let exmp = QuicTag(0x504d5845);
-
-        assert_eq!(quic_tag(b"EXMP"), IResult::Done(&b""[..], exmp));
 
         assert_eq!(exmp, quic_tag!(b"EXMP"));
         assert_eq!(exmp.as_bytes(), b"EXMP");
         assert_eq!(exmp.as_str(), "EXMP");
+
+        assert_eq!(quic_tag(b"EXMP"), IResult::Done(&b""[..], exmp));
 
         assert_eq!(u32::from(exmp), 0x504d5845);
         assert_eq!(exmp, 0x504d5845.into());

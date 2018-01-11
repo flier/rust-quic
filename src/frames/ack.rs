@@ -4,8 +4,7 @@ use time::Duration;
 
 use errors::QuicError;
 use packet::{read_ack_packet_number_length, QuicPacketNumberLength};
-use types::{QuicPacketNumber, QuicTime, QuicTimeDelta, ToQuicTimeDelta, UFloat16, ufloat16};
-use version::QuicVersion;
+use types::{QuicPacketNumber, QuicTime, QuicTimeDelta, QuicVersion, ToQuicTimeDelta, UFloat16, ufloat16};
 
 // packet number size shift used in AckFrames.
 const kQuicSequenceNumberLengthNumBits: usize = 2;
@@ -179,7 +178,7 @@ mod tests {
     const kSmallLargestObserved: QuicPacketNumber = 0x1234;
 
     #[test]
-    fn test_one_ack_block() {
+    fn one_ack_block() {
         const test_cases: &[(QuicVersion, u8, &[u8])] = &[
             (
                 QuicVersion::QUIC_VERSION_38,

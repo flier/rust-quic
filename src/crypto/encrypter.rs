@@ -1,8 +1,7 @@
 use bytes::Bytes;
 use failure::Error;
 
-use types::QuicPacketNumber;
-use version::QuicVersion;
+use types::{QuicPacketNumber, QuicVersion};
 
 /// `QuicEncrypter` implements the QUIC encrypter
 pub trait QuicEncrypter {

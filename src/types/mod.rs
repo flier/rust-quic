@@ -1,10 +1,16 @@
 #![allow(dead_code)]
 
 mod traits;
+#[macro_use]
+mod version;
+#[macro_use]
+mod tag;
 pub mod ufloat16;
 
+pub use self::tag::{quic_tag, QuicTag};
 pub use self::traits::{Perspective, ToEndianness, ToQuicPacketNumber, ToQuicTimeDelta};
 pub use self::ufloat16::UFloat16;
+pub use self::version::QuicVersion;
 
 use time::{Duration, Timespec};
 

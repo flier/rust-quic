@@ -1,6 +1,6 @@
 use nom::{self, IError, Needed};
 
-use tag::QuicTag;
+use types::QuicTag;
 
 #[derive(Debug, Fail)]
 pub enum QuicError {

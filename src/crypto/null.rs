@@ -10,8 +10,7 @@ use nom::{IResult, le_u32, le_u64};
 use crypto::{QuicDecrypter, QuicEncrypter};
 use crypto::fnv::{fnv1a, kOffset};
 use errors::QuicError;
-use types::{Perspective, QuicDiversificationNonce, QuicPacketNumber};
-use version::QuicVersion;
+use types::{Perspective, QuicDiversificationNonce, QuicPacketNumber, QuicVersion};
 
 const kHashSizeShort: usize = 12; // size of uint128 serialized short
 
@@ -209,7 +208,7 @@ mod tests {
         ];
 
     #[test]
-    fn test_null_encrypt_client() {
+    fn null_encrypt_client() {
         let encrypter = NullEncrypter::<Client>::new();
 
         assert_eq!(
@@ -226,7 +225,7 @@ mod tests {
     }
 
     #[test]
-    fn test_null_encrypt_server() {
+    fn null_encrypt_server() {
         let encrypter = NullEncrypter::<Server>::new();
 
         assert_eq!(
@@ -243,7 +242,7 @@ mod tests {
     }
 
     #[test]
-    fn test_null_encrypt_client_pre37() {
+    fn null_encrypt_client_pre37() {
         let encrypter = NullEncrypter::<Client>::new();
 
         assert_eq!(
@@ -260,7 +259,7 @@ mod tests {
     }
 
     #[test]
-    fn test_null_encrypt_server_pre37() {
+    fn null_encrypt_server_pre37() {
         let encrypter = NullEncrypter::<Server>::new();
 
         assert_eq!(
@@ -277,7 +276,7 @@ mod tests {
     }
 
     #[test]
-    fn test_null_decrypt_client() {
+    fn null_decrypt_client() {
         let decrypter = NullDecrypter::<Client>::new();
 
         assert_eq!(
@@ -294,7 +293,7 @@ mod tests {
     }
 
     #[test]
-    fn test_null_decrypt_server() {
+    fn null_decrypt_server() {
         let decrypter = NullDecrypter::<Server>::new();
 
         assert_eq!(
@@ -311,7 +310,7 @@ mod tests {
     }
 
     #[test]
-    fn test_null_decrypt_client_pre37() {
+    fn null_decrypt_client_pre37() {
         let decrypter = NullDecrypter::<Client>::new();
 
         assert_eq!(
@@ -328,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    fn test_null_decrypt_server_pre37() {
+    fn null_decrypt_server_pre37() {
         let decrypter = NullDecrypter::<Server>::new();
 
         assert_eq!(
@@ -345,7 +344,7 @@ mod tests {
     }
 
     #[test]
-    fn test_null_decrypt_bad_hash() {
+    fn null_decrypt_bad_hash() {
         let decrypter = NullDecrypter::<Client>::new();
 
         assert_matches!(
@@ -365,7 +364,7 @@ mod tests {
     }
 
     #[test]
-    fn test_null_decrypt_short() {
+    fn null_decrypt_short() {
         let decrypter = NullDecrypter::<Client>::new();
 
         assert_matches!(

@@ -8,7 +8,7 @@ use failure::{Error, Fail};
 use nom::{IResult, Needed, le_u16, le_u32};
 
 use errors::QuicError;
-use tag::{quic_tag, QuicTag};
+use types::{quic_tag, QuicTag};
 
 /// Max number of entries in a message.
 const kMaxEntries: usize = 128;
@@ -134,7 +134,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse() {
+    fn parse_message() {
         #[cfg_attr(rustfmt, rustfmt_skip)]
         let input = &[
             // tag

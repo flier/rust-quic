@@ -75,9 +75,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_fnv() {
+    fn fnv0_hash() {
         assert_eq!(fnv0(b"chongo <Landon Curt Noll> /\\../\\"), kOffset);
+    }
 
+    #[test]
+    fn fnv1_hash() {
         assert_eq!(
             fnv1(
                 kOffset,
@@ -88,7 +91,10 @@ mod tests {
             ),
             u128!(0)
         );
+    }
 
+    #[test]
+    fn fnv1a_hash() {
         assert_eq!(
             fnv1a(kOffset, b""),
             u128!(0x6c62272e07bb014262b821756295c58d)
@@ -104,7 +110,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fnv_hasher() {
+    fn fnv_hasher() {
         let mut hasher = FnvHasher::default();
 
         (b"hello").hash(&mut hasher);

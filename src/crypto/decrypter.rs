@@ -2,8 +2,7 @@ use failure::Error;
 
 use bytes::Bytes;
 
-use types::{QuicDiversificationNonce, QuicPacketNumber};
-use version::QuicVersion;
+use types::{QuicDiversificationNonce, QuicPacketNumber, QuicVersion};
 
 /// `QuicDecrypter` implements the QUIC decrypter
 pub trait QuicDecrypter {
