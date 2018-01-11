@@ -14,8 +14,8 @@ use ring::hkdf::extract_and_expand;
 use ring::hmac::SigningKey;
 
 use crypto::{QuicDecrypter, QuicEncrypter};
-use types::{QuicDiversificationNonce, QuicPacketNumber};
-use types::QuicVersion;
+use errors::QuicError;
+use types::{QuicDiversificationNonce, QuicPacketNumber, QuicVersion};
 
 /// An `Aes128Gcm12Encrypter` is a `QuicEncrypter`
 /// that implements the `AEAD_AES_128_GCM_12` algorithm specified in RFC 5282.
@@ -144,7 +144,7 @@ where
         nonce.put_u64::<NativeEndian>(packet_number);
 
         if nonce.len() != A::algorithm().nonce_len() {
-            bail!("nonce length mismatch: {}", nonce.len());
+            bail!(QuicError::NonceLenMismatch(nonce.len()));
         }
 
         self.encrypt(&nonce, associated_data, plain_text)
@@ -214,7 +214,7 @@ where
         nonce.put_u64::<NativeEndian>(packet_number);
 
         if nonce.len() != A::algorithm().nonce_len() {
-            bail!("nonce length mismatch: {}", nonce.len());
+            bail!(QuicError::NonceLenMismatch(nonce.len()));
         }
 
         let mut buf = cipher_text.to_vec();

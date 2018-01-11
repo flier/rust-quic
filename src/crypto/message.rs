@@ -32,25 +32,22 @@ impl<'a> CryptoHandshakeMessage<'a> {
                 for (tag, offset) in entries {
                     match last_tag {
                         Some(last_tag) if tag == last_tag => {
-                            bail!("duplicate tag: {}", tag);
+                            bail!(QuicError::DuplicateTag(tag));
                         }
                         Some(last_tag) if tag < last_tag => {
-                            bail!("tag {} out of order", tag);
+                            bail!(QuicError::TagOutOfOrder(tag));
                         }
                         _ => {}
                     }
 
                     if offset < last_offset {
-                        bail!("offset {} out of order", offset);
+                        bail!(QuicError::OffsetOutOfOrder(offset));
                     }
 
                     let size = offset - last_offset;
 
                     if size > remaining.len() {
-                        bail!(
-                            QuicError::IncompletePacket(Needed::Size(offset))
-                                .context("incomplete crypto handshake message payload.")
-                        );
+                        bail!(QuicError::IncompletePacket(Needed::Size(offset)).context("handshake message payload."));
                     }
 
                     values.insert(tag, &remaining[last_offset..offset]);

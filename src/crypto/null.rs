@@ -23,8 +23,7 @@ pub struct NullEncrypter<P> {
     phantom: PhantomData<P>,
 }
 
-impl<P> Default for NullEncrypter<P>
-{
+impl<P> Default for NullEncrypter<P> {
     fn default() -> Self {
         NullEncrypter {
             phantom: PhantomData,
@@ -65,8 +64,7 @@ pub struct NullDecrypter<P> {
     phantom: PhantomData<P>,
 }
 
-impl<P> Default for NullDecrypter<P>
-{
+impl<P> Default for NullDecrypter<P> {
     fn default() -> Self {
         NullDecrypter {
             phantom: PhantomData,
@@ -91,16 +89,16 @@ where
     ) -> Result<Bytes, Error> {
         debug!("decrypt {} bytes packet with FNV128", cipher_text.len());
 
-        let (plain_text, hash) = match read_hash(cipher_text) {
+        let (plain_text, expect_hash) = match read_hash(cipher_text) {
             IResult::Done(remaining, hash) => (remaining, hash),
-            IResult::Incomplete(needed) => {
-                bail!(QuicError::IncompletePacket(needed).context("incomplete packet hash."))
-            }
+            IResult::Incomplete(needed) => bail!(QuicError::IncompletePacket(needed).context("packet hash")),
             IResult::Error(err) => bail!(QuicError::InvalidPacket(err).context("unable to process crypted packet.")),
         };
 
-        if hash != compute_hash::<P>(version, associated_data, plain_text) {
-            bail!("packet hash mismatch")
+        let correct_hash = compute_hash::<P>(version, associated_data, plain_text);
+
+        if expect_hash != correct_hash {
+            bail!(QuicError::PacketHashMismatch(correct_hash));
         }
 
         Ok(plain_text.into())
@@ -349,7 +347,7 @@ mod tests {
     fn null_decrypt_bad_hash() {
         let decrypter = NullDecrypter::<Client>::default();
 
-        assert_matches!(
+        assert!(
             decrypter
                 .decrypt_packet(
                     QuicVersion::QUIC_VERSION_35,
@@ -360,8 +358,7 @@ mod tests {
                 .err()
                 .unwrap()
                 .to_string()
-                .as_str(),
-            "packet hash mismatch"
+                .starts_with("packet hash mismatch")
         );
     }
 
@@ -369,7 +366,7 @@ mod tests {
     fn null_decrypt_short() {
         let decrypter = NullDecrypter::<Client>::default();
 
-        assert_matches!(
+        assert!(
             decrypter
                 .decrypt_packet(
                     QuicVersion::QUIC_VERSION_35,
@@ -380,8 +377,7 @@ mod tests {
                 .err()
                 .unwrap()
                 .to_string()
-                .as_str(),
-            "packet hash mismatch"
+                .starts_with("packet hash mismatch")
         );
     }
 }

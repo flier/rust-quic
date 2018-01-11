@@ -181,7 +181,7 @@ where
         let (payload, public_header) = QuicPacketPublicHeader::parse::<E>(packet, P::is_server())?;
 
         if public_header.reset_flag && public_header.versions.is_some() {
-            bail!("Got version flag in reset packet");
+            bail!(QuicError::InvalidPacketHeader("got version flag in reset packet".to_owned()));
         }
 
         if !self.visitor
@@ -237,7 +237,7 @@ where
         );
 
         if message.tag() != kPRST {
-            bail!("Incorrect message tag: {}.", message.tag());
+            bail!(QuicError::InvalidResetPacket(format!("incorrect message tag: {}", message.tag())));
         }
 
         let packet = QuicPublicResetPacket {
@@ -270,7 +270,9 @@ where
         let (remaining, header) = self.process_unauthenticated_header::<E>(input, public_header)?;
 
         if !self.visitor.on_unauthenticated_header(&header) {
-            bail!("Visitor asked to stop processing of unauthenticated header.")
+            debug!("Visitor asked to stop processing of unauthenticated header.");
+
+            return Ok(());
         }
 
         let payload = self.decrypt_payload::<P>(remaining, &header, packet)
@@ -314,7 +316,7 @@ where
         )?;
 
         if packet_number == 0 {
-            bail!("packet numbers cannot be 0.")
+            bail!(QuicError::InvalidPacketHeader("packet numbers cannot be 0".to_owned()));
         }
 
         Ok((

@@ -63,8 +63,7 @@ impl FromStr for QuicVersion {
             "Q039" => Ok(QuicVersion::QUIC_VERSION_39),
             "Q040" => Ok(QuicVersion::QUIC_VERSION_40),
             "Q041" => Ok(QuicVersion::QUIC_VERSION_41),
-            _ if s.len() >= 4 => bail!(QuicError::UnsupportedVersion(QuicTag::new(s.as_bytes()))),
-            _ => bail!("incomplete QUIC tag, {}", s),
+            _ => bail!(QuicError::UnsupportedVersion(QuicTag::new(s.as_bytes()))),
         }
     }
 }
