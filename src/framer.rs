@@ -105,7 +105,7 @@ impl<'a, V> QuicFramer<'a, V> {
             visitor,
             last_packet_number: 0,
             largest_packet_number: 0,
-            decrypter: Box::new(NullDecrypter::<P>::new()),
+            decrypter: Box::new(NullDecrypter::<P>::default()),
             alternative_decrypter: None,
             decrypter_level: EncryptionLevel::None,
             alternative_decrypter_level: EncryptionLevel::None,
@@ -189,16 +189,21 @@ where
         {
             // The visitor suppresses further processing of the packet.
             Ok(())
-        } else if P::is_server() && public_header.versions.as_ref().map_or(false, |versions| {
-            versions[0] != self.quic_version && !self.visitor.on_protocol_version_mismatch(versions[0])
-        }) {
-            Ok(())
-        } else if !P::is_server() && public_header.versions.as_ref().is_some() {
-            self.process_version_negotiation_packet(payload, public_header)
-        } else if public_header.reset_flag {
-            self.process_public_reset_packet(payload, public_header)
         } else {
-            self.process_data_packet::<P, E>(payload, public_header, packet)
+            let protocol_version_mismatched = P::is_server()
+                && public_header.versions.as_ref().map_or(false, |versions| {
+                    versions[0] != self.quic_version && !self.visitor.on_protocol_version_mismatch(versions[0])
+                });
+
+            if protocol_version_mismatched {
+                Ok(())
+            } else if !P::is_server() && public_header.versions.as_ref().is_some() {
+                self.process_version_negotiation_packet(payload, public_header)
+            } else if public_header.reset_flag {
+                self.process_public_reset_packet(payload, public_header)
+            } else {
+                self.process_data_packet::<P, E>(payload, public_header, packet)
+            }
         }
     }
 
@@ -285,7 +290,7 @@ where
         }
 
         // Handle the payload.
-        self.process_frame_data(&payload, header)?;
+        self.process_frame_data(&payload, &header)?;
 
         self.visitor.on_packet_complete();
 
@@ -334,7 +339,7 @@ where
 
         let packet_number = QuicPacketNumber::from_wire(packet_number_length, base_packet_number, wire_packet_number);
 
-        return Ok((&input[packet_number_length..], packet_number));
+        Ok((&input[packet_number_length..], packet_number))
     }
 
     fn decrypt_payload<'p, P>(
@@ -346,7 +351,7 @@ where
     where
         P: Perspective,
     {
-        let associated_data = self.get_associated_data_from_encrypted_packet(&header, packet);
+        let associated_data = self.get_associated_data_from_encrypted_packet(header, packet);
 
         if let Ok(decrypted) = self.decrypter.decrypt_packet(
             self.quic_version,
@@ -407,7 +412,7 @@ where
         self.largest_packet_number = cmp::max(self.largest_packet_number, header.packet_number);
     }
 
-    fn process_frame_data(&self, payload: &[u8], header: QuicPacketHeader) -> Result<(), Error> {
+    fn process_frame_data(&self, payload: &[u8], _header: &QuicPacketHeader) -> Result<(), Error> {
         while let Some((frame_type, payload)) = payload.split_first() {
             let frame_type = *frame_type;
 
@@ -455,31 +460,35 @@ named!(
     many1!(quic_version)
 );
 
-/// For convenience, the values of these constants match the values of AF_INET and AF_INET6 on Linux.
+/// For convenience, the values of these constants match the values of `AF_INET` and `AF_INET6` on Linux.
 const kIPv4: u16 = 2;
 const kIPv6: u16 = 10;
 
 const kIPv4AddressSize: usize = 4;
 const kIPv6AddressSize: usize = 16;
 
+#[cfg_attr(rustfmt, rustfmt_skip)]
 named!(
     parse_socket_address<Option<SocketAddr>>,
     do_parse!(
-        address_family: le_u16
-            >> ip:
-                switch!(value!(address_family),
-        kIPv4 => take!(kIPv4AddressSize) |
-        kIPv6 => take!(kIPv6AddressSize)
-    ) >> port: le_u16 >> (match address_family {
-            kIPv4 => Some(SocketAddr::new(
-                IpAddr::V4(Ipv4Addr::from(*array_ref!(ip, 0, kIPv4AddressSize))),
-                port
-            )),
-            kIPv6 => Some(SocketAddr::new(
-                IpAddr::V6(Ipv6Addr::from(*array_ref!(ip, 0, kIPv6AddressSize))),
-                port
-            )),
-            _ => None,
-        })
+        address_family: le_u16 >>
+        ip: switch!(value!(address_family),
+            kIPv4 => take!(kIPv4AddressSize) |
+            kIPv6 => take!(kIPv6AddressSize)
+        ) >>
+        port: le_u16 >>
+        (
+            match address_family {
+                kIPv4 => Some(SocketAddr::new(
+                    IpAddr::V4(Ipv4Addr::from(*array_ref!(ip, 0, kIPv4AddressSize))),
+                    port
+                )),
+                kIPv6 => Some(SocketAddr::new(
+                    IpAddr::V6(Ipv6Addr::from(*array_ref!(ip, 0, kIPv6AddressSize))),
+                    port
+                )),
+                _ => None,
+            }
+        )
     )
 );

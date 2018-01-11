@@ -17,41 +17,39 @@ use crypto::{QuicDecrypter, QuicEncrypter};
 use types::{QuicDiversificationNonce, QuicPacketNumber};
 use types::QuicVersion;
 
-const kAuthTagSize: usize = 12;
-
 /// An `Aes128Gcm12Encrypter` is a `QuicEncrypter`
-/// that implements the AEAD_AES_128_GCM_12 algorithm specified in RFC 5282.
+/// that implements the `AEAD_AES_128_GCM_12` algorithm specified in RFC 5282.
 ///
-/// Create an instance by calling QuicEncrypter::Create(kAESG).
+/// Create an instance by calling `encrypter::new(kAESG)`.
 ///
 /// It uses an authentication tag of 12 bytes (96 bits).
 /// The fixed prefix of the nonce is four bytes.
 pub type Aes128Gcm12Encrypter<'a> = AeadBaseEncrypter<'a, Aes128Gcm12>;
 
 /// An `Aes128Gcm12Decrypter` is a `QuicDecrypter`
-/// that implements the AEAD_AES_128_GCM_12 algorithm specified in RFC 5282.
+/// that implements the `AEAD_AES_128_GCM_12` algorithm specified in RFC 5282.
 ///
-/// Create an instance by calling QuicDecrypter::Create(kAESG).
+/// Create an instance by calling `decrypter::new(kAESG)`.
 ///
 /// It uses an authentication tag of 12 bytes (96 bits).
 /// The fixed prefix of the nonce is four bytes.
 pub type Aes128Gcm12Decrypter<'a> = AeadBaseDecrypter<'a, Aes128Gcm12>;
 
 /// A `ChaCha20Poly1305Encrypter` is a `QuicEncrypter`
-/// that implements the AEAD_CHACHA20_POLY1305 algorithm specified in RFC 7539,
+/// that implements the `AEAD_CHACHA20_POLY1305` algorithm specified in RFC 7539,
 /// except that it truncates the Poly1305 authenticator to 12 bytes.
 ///
-/// Create an instance by calling QuicEncrypter::Create(kCC12).
+/// Create an instance by calling `encrypter::new(kCC12)`.
 ///
 /// It uses an authentication tag of 16 bytes (128 bits).
 /// There is no fixed nonce prefix.
 pub type ChaCha20Poly1305Encrypter<'a> = AeadBaseEncrypter<'a, ChaCha20Poly1305>;
 
 /// A `ChaCha20Poly1305Decrypter` is a `QuicDecrypter`
-/// that implements the AEAD_CHACHA20_POLY1305 algorithm specified in draft-agl-tls-chacha20poly1305-04,
+/// that implements the `AEAD_CHACHA20_POLY1305` algorithm specified in draft-agl-tls-chacha20poly1305-04,
 /// except that it truncates the Poly1305 authenticator to 12 bytes.
 ///
-/// Create an instance by calling QuicDecrypter::Create(kCC12).
+/// Create an instance by calling `decrypter::new(kCC12)`.
 ///
 /// It uses an authentication tag of 16 bytes (128 bits).
 /// There is no fixed nonce prefix.
@@ -118,7 +116,7 @@ where
 
         buf.extend(iter::repeat(0).take(tag_len));
 
-        let size = seal_in_place(&key, &nonce, associated_data, &mut buf, tag_len)?;
+        let size = seal_in_place(&key, nonce, associated_data, &mut buf, tag_len)?;
 
         Ok(Bytes::from(buf).split_to(size))
     }
@@ -128,7 +126,7 @@ impl<'a, A> QuicEncrypter for AeadBaseEncrypter<'a, A>
 where
     A: AeadAlgorithm,
 {
-    fn encrypt_packet<'p>(
+    fn encrypt_packet(
         &self,
         _version: QuicVersion,
         packet_number: QuicPacketNumber,
@@ -239,6 +237,8 @@ mod tests {
 
     use super::*;
 
+    const kAuthTagSize: usize = 12;
+
     const aes_128_gcm_12_encrypt_test_groups: &[(
         // key_len, iv_len, pt_len, aad_len, tag_len
         (usize, usize, usize, usize, usize),
@@ -318,17 +318,25 @@ mod tests {
                 (
                     "fe47fcce5fc32665d2ae399e4eec72ba",
                     "5adb9609dbaeb58cbd6e7275",
-                    "7c0e88c88899a779228465074797cd4c2e1498d259b54390b85e3eef1c02df60e743f1b840382c4bccaf3bafb4ca8429bea063",
+                    "7c0e88c88899a779228465074797cd4c2e1498d2\
+                     59b54390b85e3eef1c02df60e743f1b840382c4bc\
+                     caf3bafb4ca8429bea063",
                     "88319d6e1d3ffa5f987199166c8a9b56c2aeba5a",
-                    "98f4826f05a265e6dd2be82db241c0fbbbf9ffb1c173aa83964b7cf5393043736365253ddbc5db8778371495da76d269e5db3e",
+                    "98f4826f05a265e6dd2be82db241c0fbbbf9ffb1\
+                     c173aa83964b7cf5393043736365253ddbc5db877\
+                     8371495da76d269e5db3e",
                     "291ef1982e4defedaa2249f898556b47",
                 ),
                 (
                     "ec0c2ba17aa95cd6afffe949da9cc3a8",
                     "296bce5b50b7d66096d627ef",
-                    "b85b3753535b825cbe5f632c0b843c741351f18aa484281aebec2f45bb9eea2d79d987b764b9611f6c0f8641843d5d58f3a242",
+                    "b85b3753535b825cbe5f632c0b843c741351f18a\
+                     a484281aebec2f45bb9eea2d79d987b764b9611f6\
+                     c0f8641843d5d58f3a242",
                     "f8d00f05d22bf68599bcdeb131292ad6e2df5d14",
-                    "a7443d31c26bdf2a1c945e29ee4bd344a99cfaf3aa71f8b3f191f83c2adfc7a07162995506fde6309ffc19e716eddf1a828c5a",
+                    "a7443d31c26bdf2a1c945e29ee4bd344a99cfaf3\
+                     aa71f8b3f191f83c2adfc7a07162995506fde6309\
+                     ffc19e716eddf1a828c5a",
                     "890147971946b627c40016da1ecf3e77",
                 ),
             ],
@@ -340,17 +348,25 @@ mod tests {
                 (
                     "2c1f21cf0f6fb3661943155c3e3d8492",
                     "23cb5ff362e22426984d1907",
-                    "42f758836986954db44bf37c6ef5e4ac0adaf38f27252a1b82d02ea949c8a1a2dbc0d68b5615ba7c1220ff6510e259f06655d8",
-                    "5d3624879d35e46849953e45a32a624d6a6c536ed9857c613b572b0333e701557a713e3f010ecdf9a6bd6c9e3e44b065208645aff4aabee611b391528514170084ccf587177f4488f33cfb5e979e42b6e1cfc0a60238982a7aec",
-                    "81824f0e0d523db30d3da369fdc0d60894c7a0a20646dd015073ad2732bd989b14a222b6ad57af43e1895df9dca2a5344a62cc",
+                    "42f758836986954db44bf37c6ef5e4ac0adaf38f27252a1b82d02ea9\
+                     49c8a1a2dbc0d68b5615ba7c1220ff6510e259f06655d8",
+                    "5d3624879d35e46849953e45a32a624d6a6c536ed9857c613b572b033\
+                     3e701557a713e3f010ecdf9a6bd6c9e3e44b065208645aff4aabee611b\
+                     391528514170084ccf587177f4488f33cfb5e979e42b6e1cfc0a60238982a7aec",
+                    "81824f0e0d523db30d3da369fdc0d60894c7a0a20646dd015073ad273\
+                     2bd989b14a222b6ad57af43e1895df9dca2a5344a62cc",
                     "57a3ee28136e94c74838997ae9823f3a",
                 ),
                 (
                     "d9f7d2411091f947b4d6f1e2d1f0fb2e",
                     "e1934f5db57cc983e6b180e7",
-                    "73ed042327f70fe9c572a61545eda8b2a0c6e1d6c291ef19248e973aee6c312012f490c2c6f6166f4a59431e182663fcaea05a",
-                    "0a8a18a7150e940c3d87b38e73baee9a5c049ee21795663e264b694a949822b639092d0e67015e86363583fcf0ca645af9f43375f05fdb4ce84f411dcbca73c2220dea03a20115d2e51398344b16bee1ed7c499b353d6c597af8",
-                    "aaadbd5c92e9151ce3db7210b8714126b73e43436d242677afa50384f2149b831f1d573c7891c2a91fbc48db29967ec9542b23",
+                    "73ed042327f70fe9c572a61545eda8b2a0c6e1d6c291ef19248e973ae\
+                     e6c312012f490c2c6f6166f4a59431e182663fcaea05a",
+                    "0a8a18a7150e940c3d87b38e73baee9a5c049ee21795663e264b694a9\
+                     49822b639092d0e67015e86363583fcf0ca645af9f43375f05fdb4ce84\
+                     f411dcbca73c2220dea03a20115d2e51398344b16bee1ed7c499b353d6c597af8",
+                    "aaadbd5c92e9151ce3db7210b8714126b73e43436d242677afa50384f\
+                     2149b831f1d573c7891c2a91fbc48db29967ec9542b23",
                     "21b51ca862cb637cdd03b99a0f93b134",
                 ),
             ],
@@ -466,28 +482,42 @@ mod tests {
                 (
                     "af57f42c60c0fc5a09adb81ab86ca1c3",
                     "a2dc01871f37025dc0fc9a79",
-                    "b9a535864f48ea7b6b1367914978f9bfa087d854bb0e269bed8d279d2eea1210e48947338b22f9bad09093276a331e9c79c7f4",
+                    "b9a535864f48ea7b6b1367914978f9bfa087d854\
+                     bb0e269bed8d279d2eea1210e48947338b22f9bad\
+                     09093276a331e9c79c7f4",
                     "41dc38988945fcb44faf2ef72d0061289ef8efd8",
                     "4f71e72bde0018f555c5adcce062e005",
-                    Some("3803a0727eeb0ade441e0ec107161ded2d425ec0d102f21f51bf2cf9947c7ec4aa72795b2f69b041596e8817d0a3c16f8fadeb")
+                    Some(
+                        "3803a0727eeb0ade441e0ec107161ded2d4\
+                         25ec0d102f21f51bf2cf9947c7ec4aa72795b2f69b\
+                         041596e8817d0a3c16f8fadeb",
+                    ),
                 ),
                 (
                     "ebc753e5422b377d3cb64b58ffa41b61",
                     "2e1821efaced9acf1f241c9b",
-                    "069567190554e9ab2b50a4e1fbf9c147340a5025fdbd201929834eaf6532325899ccb9f401823e04b05817243d2142a3589878",
+                    "069567190554e9ab2b50a4e1fbf9c147340a5025\
+                     fdbd201929834eaf6532325899ccb9f401823e04b\
+                     05817243d2142a3589878",
                     "b9673412fd4f88ba0e920f46dd6438ff791d8eef",
                     "534d9234d2351cf30e565de47baece0b",
-                    Some("39077edb35e9c5a4b1e4c2a6b9bb1fce77f00f5023af40333d6d699014c2bcf4209c18353a18017f5b36bfc00b1f6dcb7ed485")
+                    Some(
+                        "39077edb35e9c5a4b1e4c2a6b9bb1fce77f\
+                         00f5023af40333d6d699014c2bcf4209c18353a18\
+                         017f5b36bfc00b1f6dcb7ed485",
+                    ),
                 ),
                 (
                     "52bdbbf9cf477f187ec010589cb39d58",
                     "d3be36d3393134951d324b31",
-                    "700188da144fa692cf46e4a8499510a53d90903c967f7f13e8a1bd8151a74adc4fe63e32b992760b3a5f99e9a47838867000a9",
+                    "700188da144fa692cf46e4a8499510a53d90903c\
+                     967f7f13e8a1bd8151a74adc4fe63e32b992760b3\
+                     a5f99e9a47838867000a9",
                     "93c4fc6a4135f54d640b0c976bf755a06a292c33",
                     "8ca4e38aa3dfa6b1d0297021ccf3ea5f",
-                    None,  // FAIL
+                    None, // FAIL
                 ),
-            ]
+            ],
         ),
         // test_group_4
         (
@@ -496,26 +526,55 @@ mod tests {
                 (
                     "da2bb7d581493d692380c77105590201",
                     "44aa3e7856ca279d2eb020c6",
-                    "9290d430c9e89c37f0446dbd620c9a6b34b1274aeb6f911f75867efcf95b6feda69f1af4ee16c761b3c9aeac3da03aa9889c88",
-                    "4cd171b23bddb3a53cdf959d5c1710b481eb3785a90eb20a2345ee00d0bb7868c367ab12e6f4dd1dee72af4eee1d197777d1d6499cc541f34edbf45cda6ef90b3c024f9272d72ec1909fb8fba7db88a4d6f7d3d925980f9f9f72",
+                    "9290d430c9e89c37f0446dbd620c9a6b\
+                     34b1274aeb6f911f75867efcf95b6feda\
+                     69f1af4ee16c761b3c9aeac3da03aa9889c88",
+                    "4cd171b23bddb3a53cdf959d5c1710b4\
+                     81eb3785a90eb20a2345ee00d0bb7868c\
+                     367ab12e6f4dd1dee72af4eee1d197777\
+                     d1d6499cc541f34edbf45cda6ef90b3c0\
+                     24f9272d72ec1909fb8fba7db88a4d6f7\
+                     d3d925980f9f9f72",
                     "9e3ac938d3eb0cadd6f5c9e35d22ba38",
-                    Some("9bbf4c1a2742f6ac80cb4e8a052e4a8f4f07c43602361355b717381edf9fabd4cb7e3ad65dbd1378b196ac270588dd0621f642")
+                    Some(
+                        "9bbf4c1a2742f6ac80cb4e8a052\
+                         e4a8f4f07c43602361355b717381edf9f\
+                         abd4cb7e3ad65dbd1378b196ac270588d\
+                         d0621f642",
+                    ),
                 ),
                 (
                     "d74e4958717a9d5c0e235b76a926cae8",
                     "0b7471141e0c70b1995fd7b1",
-                    "e701c57d2330bf066f9ff8cf3ca4343cafe4894651cd199bdaaa681ba486b4a65c5a22b0f1420be29ea547d42c713bc6af66aa",
-                    "4a42b7aae8c245c6f1598a395316e4b8484dbd6e64648d5e302021b1d3fa0a38f46e22bd9c8080b863dc0016482538a8562a4bd0ba84edbe2697c76fd039527ac179ec5506cf34a6039312774cedebf4961f3978b14a26509f96",
+                    "e701c57d2330bf066f9ff8cf3ca4343c\
+                     afe4894651cd199bdaaa681ba486b4a65\
+                     c5a22b0f1420be29ea547d42c713bc6af66aa",
+                    "4a42b7aae8c245c6f1598a395316e4b8\
+                     484dbd6e64648d5e302021b1d3fa0a38f\
+                     46e22bd9c8080b863dc0016482538a856\
+                     2a4bd0ba84edbe2697c76fd039527ac17\
+                     9ec5506cf34a6039312774cedebf4961f\
+                     3978b14a26509f96",
                     "e192c23cb036f0b31592989119eed55d",
-                    Some("840d9fb95e32559fb3602e48590280a172ca36d9b49ab69510f5bd552bfab7a306f85ff0a34bc305b88b804c60b90add594a17")
+                    Some(
+                        "840d9fb95e32559fb3602e48590\
+                         280a172ca36d9b49ab69510f5bd552bfa\
+                         b7a306f85ff0a34bc305b88b804c60b90add594a17",
+                    ),
                 ),
                 (
                     "1986310c725ac94ecfe6422e75fc3ee7",
                     "93ec4214fa8e6dc4e3afc775",
-                    "b178ec72f85a311ac4168f42a4b2c23113fbea4b85f4b9dabb74e143eb1b8b0a361e0243edfd365b90d5b325950df0ada058f9",
-                    "e80b88e62c49c958b5e0b8b54f532d9ff6aa84c8a40132e93e55b59fc24e8decf28463139f155d1e8ce4ee76aaeefcd245baa0fc519f83a5fb9ad9aa40c4b21126013f576c4272c2cb136c8fd091cc4539877a5d1e72d607f960",
+                    "b178ec72f85a311ac4168f42a4b2c231\
+                     13fbea4b85f4b9dabb74e143eb1b8b0a3\
+                     61e0243edfd365b90d5b325950df0ada058f9",
+                    "e80b88e62c49c958b5e0b8b54f532d9f\
+                     f6aa84c8a40132e93e55b59fc24e8decf\
+                     28463139f155d1e8ce4ee76aaeefcd245\
+                     baa0fc519f83a5fb9ad9aa40c4b211260\
+                     13f576c4272c2cb136c8fd091cc4539877a5d1e72d607f960",
                     "8b347853f11d75e81e8a95010be81f17",
-                    None,  // FAIL
+                    None, // FAIL
                 ),
             ],
         ),
@@ -529,7 +588,7 @@ mod tests {
                     "cdba9e73eaf3d38eceb2b04a8d",
                     "",
                     "ecf90f4a47c9c626d6fb2c765d201556",
-                    Some("48f5b426baca03064554cc2b30")
+                    Some("48f5b426baca03064554cc2b30"),
                 ),
                 (
                     "294de463721e359863887c820524b3d4",
@@ -537,7 +596,7 @@ mod tests {
                     "2f46634e74b8e4c89812ac83b9",
                     "",
                     "dabd506764e68b82a7e720aa18da0abe",
-                    Some("46a2e55c8e264df211bd112685")
+                    Some("46a2e55c8e264df211bd112685"),
                 ),
                 (
                     "28ead7fd2179e0d12aa6d5d88c58c2dc",
@@ -545,7 +604,7 @@ mod tests {
                     "142d8210c3fb84774cdbd0447a",
                     "",
                     "5fd321d9cdb01952dc85f034736c2a7d",
-                    Some("3b95b981086ee73cc4d0cc1422")
+                    Some("3b95b981086ee73cc4d0cc1422"),
                 ),
                 (
                     "7d7b6c988137b8d470c57bf674a09c87",
@@ -553,7 +612,7 @@ mod tests {
                     "a85b66c3cb5eab91d5bdc8bc0e",
                     "",
                     "dc054efc01f3afd21d9c2484819f569a",
-                    None,  // FAIL
+                    None, // FAIL
                 ),
             ],
         ),
@@ -565,11 +624,17 @@ mod tests {
     ] = &[
         (
             "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
-            "4c616469657320616e642047656e746c656d656e206f662074686520636c617373206f66202739393a204966204920636f756c64206f6666657220796f75206f6e6c79206f6e652074697020666f7220746865206675747572652c2073756e73637265656e20776f756c642062652069742e",
+            "4c616469657320616e642047656e746c656d656e206f662074686520636c6173\
+            73206f66202739393a204966204920636f756c64206f6666657220796f75206f6\
+            e6c79206f6e652074697020666f7220746865206675747572652c2073756e7363\
+            7265656e20776f756c642062652069742e",
             "4041424344454647",
             "07000000",
             "50515253c0c1c2c3c4c5c6c7",
-            "d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d63dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b3692ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3ff4def08e4b7a9de576d26586cec64b61161ae10b594f09e26a7e902ecb",  // "d0600691" truncated
+            "d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d6\
+            3dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b369\
+            2ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3f\
+            f4def08e4b7a9de576d26586cec64b61161ae10b594f09e26a7e902ecb",  // "d0600691" truncated
         )
     ];
 
@@ -582,8 +647,14 @@ mod tests {
             "4041424344454647",
             "07000000",
             "50515253c0c1c2c3c4c5c6c7",
-            "d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d63dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b3692ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3ff4def08e4b7a9de576d26586cec64b61161ae10b594f09e26a7e902ecb",  // "d0600691" truncated
-            Some("4c616469657320616e642047656e746c656d656e206f662074686520636c617373206f66202739393a204966204920636f756c64206f6666657220796f75206f6e6c79206f6e652074697020666f7220746865206675747572652c2073756e73637265656e20776f756c642062652069742e")
+            "d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d6\
+            3dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b369\
+            2ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3f\
+            f4def08e4b7a9de576d26586cec64b61161ae10b594f09e26a7e902ecb",  // "d0600691" truncated
+            Some("4c616469657320616e642047656e746c656d656e206f662074686520636\
+            c617373206f66202739393a204966204920636f756c64206f6666657220796f75\
+            206f6e6c79206f6e652074697020666f7220746865206675747572652c2073756\
+            e73637265656e20776f756c642062652069742e")
         ),
         // Modify the ciphertext (Poly1305 authenticator).
         (
@@ -591,7 +662,10 @@ mod tests {
             "4041424344454647",
             "07000000",
             "50515253c0c1c2c3c4c5c6c7",
-            "d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d63dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b3692ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3ff4def08e4b7a9de576d26586cec64b61161ae10b594f09e26a7e902ecc",  // "d0600691" truncated
+            "d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d6\
+            3dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b369\
+            2ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3f\
+            f4def08e4b7a9de576d26586cec64b61161ae10b594f09e26a7e902ecc",  // "d0600691" truncated
             None,
         ),
         // Modify the associated data.
@@ -600,7 +674,10 @@ mod tests {
             "4041424344454647",
             "07000000",
             "60515253c0c1c2c3c4c5c6c7",
-            "d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d63dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b3692ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3ff4def08e4b7a9de576d26586cec64b61161ae10b594f09e26a7e902ecb",  // "d0600691" truncated
+            "d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d6\
+            3dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b369\
+            2ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3f\
+            f4def08e4b7a9de576d26586cec64b61161ae10b594f09e26a7e902ecb",  // "d0600691" truncated
             None,
         )
     ];

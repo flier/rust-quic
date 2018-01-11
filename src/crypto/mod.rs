@@ -1,9 +1,9 @@
 mod proto;
 mod message;
 mod framer;
-mod fnv;
-mod encrypter;
-mod decrypter;
+pub mod fnv;
+pub mod encrypter;
+pub mod decrypter;
 mod null;
 mod aead;
 

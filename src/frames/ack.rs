@@ -109,7 +109,7 @@ named_args!(parse_quic_ack_frame(quic_version: QuicVersion,
         timestamps: cond!(
             num_received_packets > 0,
             tuple!(
-                map!(be_u8, |n| n as QuicPacketNumber),
+                map!(be_u8, QuicPacketNumber::from),
                 u32!(quic_version.endianness()),
                 many_m_n!(num_received_packets-1, num_received_packets-1,
                     tuple!(be_u8, map!(u16!(quic_version.endianness()), UFloat16::from))
@@ -131,7 +131,7 @@ named_args!(parse_quic_ack_frame(quic_version: QuicVersion,
                             QuicTimeDelta::from_wire(last_timestamp, time_delta_us),
                         ),
                         |(mut times, last_timestamp), (delta_from_largest_observed, incremental_time_delta_us)| {
-                            let seq_num = largest_observed - delta_from_largest_observed as u64;
+                            let seq_num = largest_observed - u64::from(delta_from_largest_observed);
                             let timestamp = last_timestamp + Duration::microseconds(incremental_time_delta_us.into());
 
                             times.push((seq_num, creation_time + timestamp));
@@ -144,7 +144,7 @@ named_args!(parse_quic_ack_frame(quic_version: QuicVersion,
                     ranges: packet_ranges.into_iter().fold(
                         (vec![(first_received, largest_observed+1)], first_received),
                         |(mut ranges, mut first_received), (gap, current_block_length)| {
-                            first_received -= gap as u64 + current_block_length;
+                            first_received -= u64::from(gap) + current_block_length;
 
                             if current_block_length > 0 {
                                 ranges.push((first_received, first_received + current_block_length))

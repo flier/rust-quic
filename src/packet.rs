@@ -1,4 +1,4 @@
-#![allow(non_upper_case_globals)]
+#![allow(dead_code, non_upper_case_globals)]
 
 use std::net::SocketAddr;
 use std::ops::Deref;
@@ -16,8 +16,9 @@ use types::QuicVersion;
 
 const kPublicHeaderConnectionIdSize: usize = 8;
 
-/// kDiversificationNonceSize is the size, in bytes, of the nonce
-/// that a server may set in the packet header to ensure that its INITIAL keys are not duplicated.
+/// `kDiversificationNonceSize` is the size, in bytes,
+/// of the nonce that a server may set in the packet header
+/// to ensure that its INITIAL keys are not duplicated.
 const kDiversificationNonceSize: usize = 32;
 
 pub type QuicPacketNumberLengthFlags = u8;
@@ -62,7 +63,7 @@ bitflags! {
         const PACKET_PUBLIC_FLAGS_NONE = 0;
 
         // Bit 0: Does the packet header contains version info?
-        const PACKET_PUBLIC_FLAGS_VERSION = 1 << 0;
+        const PACKET_PUBLIC_FLAGS_VERSION = 1;
 
         // Bit 1: Is this packet a public reset packet?
         const PACKET_PUBLIC_FLAGS_RST = 1 << 1;
@@ -182,24 +183,24 @@ pub type QuicVersionNegotiationPacket<'a> = QuicPacketPublicHeader<'a>;
 
 /// Recognizes big endian unsigned 8 bytes integer
 #[inline]
-fn be_u48(i: &[u8]) -> IResult<&[u8], u64> {
+pub fn be_u48(i: &[u8]) -> IResult<&[u8], u64> {
     if i.len() < 6 {
         IResult::Incomplete(Needed::Size(6))
     } else {
-        let res = ((i[0] as u64) << 40) + ((i[1] as u64) << 32) + ((i[2] as u64) << 24) + ((i[3] as u64) << 16)
-            + ((i[4] as u64) << 8) + i[5] as u64;
+        let res = (u64::from(i[0]) << 40) + (u64::from(i[1]) << 32) + (u64::from(i[2]) << 24) + (u64::from(i[3]) << 16)
+            + (u64::from(i[4]) << 8) + u64::from(i[5]);
         IResult::Done(&i[6..], res)
     }
 }
 
 /// Recognizes little endian unsigned 8 bytes integer
 #[inline]
-fn le_u48(i: &[u8]) -> IResult<&[u8], u64> {
+pub fn le_u48(i: &[u8]) -> IResult<&[u8], u64> {
     if i.len() < 6 {
         IResult::Incomplete(Needed::Size(6))
     } else {
-        let res = ((i[5] as u64) << 40) + ((i[4] as u64) << 32) + ((i[3] as u64) << 24) + ((i[2] as u64) << 16)
-            + ((i[1] as u64) << 8) + i[0] as u64;
+        let res = (u64::from(i[5]) << 40) + (u64::from(i[4]) << 32) + (u64::from(i[3]) << 24) + (u64::from(i[2]) << 16)
+            + (u64::from(i[1]) << 8) + u64::from(i[0]);
         IResult::Done(&i[6..], res)
     }
 }

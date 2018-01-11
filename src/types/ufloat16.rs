@@ -3,12 +3,11 @@
 use std::u16;
 
 /// We define an unsigned 16-bit floating point value, inspired by IEEE floats
-/// (http://en.wikipedia.org/wiki/Half_precision_floating-point_format),
+/// <http://en.wikipedia.org/wiki/Half_precision_floating-point_format/>,
 /// with 5-bit exponent (bias 1), 11-bit mantissa (effective 12 with hidden
 /// bit) and denormals, but without signs, transfinites or fractions. Wire format
 /// 16 bits (little-endian byte order) are split into exponent (high 5) and
 /// mantissa (low 11) and decoded as:
-///   uint64_t value;
 ///   if (exponent == 0) value = mantissa;
 ///   else value = (mantissa | 1 << 11) << (exponent - 1)
 
@@ -109,7 +108,7 @@ impl From<u16> for UFloat16 {
             // normalized (hidden bit set, exponent offset by one) with exponent zero.
             // Zero exponent offset by one sets the bit exactly where the hidden bit is.
             // So in both cases the value encodes itself.
-            v as u64
+            u64::from(v)
         } else {
             let exponent = (v >> kUFloat16MantissaBits) - 1; // No sign extend on uint!
 
@@ -126,7 +125,7 @@ impl From<u16> for UFloat16 {
             // Here we need to clear the exponent and set the hidden bit. We have already
             // decremented the exponent, so when we subtract it, it leaves behind the
             // hidden bit.
-            let value = (v as u64 - (exponent << kUFloat16MantissaBits) as u64) << exponent as usize;
+            let value = (u64::from(v) - u64::from(exponent << kUFloat16MantissaBits)) << exponent as usize;
 
             debug_assert!(
                 value >= 1 << kUFloat16MantissaEffectiveBits,

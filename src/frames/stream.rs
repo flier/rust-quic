@@ -115,11 +115,12 @@ named_args!(
             offset: uint!(quic_version.endianness(), offset_length) >>
             data_len_pre40: cond!(has_data_length && quic_version <= QuicVersion::QUIC_VERSION_39,
                                   u16!(quic_version.endianness())) >>
+            data_len: value!(data_len_new.or(data_len_pre40)) >>
         (
             (
                 stream_id as QuicStreamId,
                 offset as QuicStreamOffset,
-                data_len_new.or(data_len_pre40).map(|n| n as usize),
+                data_len.map(|n| n as usize),
             )
         )
     )

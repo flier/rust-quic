@@ -14,7 +14,7 @@ use types::{quic_tag, QuicTag};
 const kMaxEntries: usize = 128;
 
 /// An intermediate format of a handshake message
-/// that's convenient for a CryptoFramer to serialize from or parse into.
+/// that's convenient for a `CryptoFramer` to serialize from or parse into.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CryptoHandshakeMessage<'a> {
     tag: QuicTag,
@@ -122,7 +122,7 @@ named!(
         padding: take!(2) >>
         entries: many_m_n!(num_entries, num_entries, tuple!(quic_tag, map!(le_u32, |n| n as usize))) >>
         (
-            (tag, entries)
+            tag, entries
         )
     )
 );

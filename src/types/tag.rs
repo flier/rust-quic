@@ -1,6 +1,5 @@
 use std::fmt;
 use std::iter;
-use std::mem;
 use std::slice;
 use std::str;
 use std::str::FromStr;
@@ -24,7 +23,7 @@ impl QuicTag {
     }
 
     pub fn as_bytes(&self) -> &[u8] {
-        unsafe { slice::from_raw_parts(mem::transmute(&self.0), 4) }
+        unsafe { slice::from_raw_parts(&self.0 as *const u32 as *const u8, 4) }
     }
 
     pub fn as_str(&self) -> &str {

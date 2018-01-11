@@ -27,7 +27,7 @@ pub type QuicDiversificationNonce = [u8; 32];
 pub type QuicTime = Timespec;
 pub type QuicTimeDelta = Duration;
 
-/// EncryptionLevel enumerates the stages of encryption that a QUIC connection progresses through.
+/// `EncryptionLevel` enumerates the stages of encryption that a QUIC connection progresses through.
 /// When retransmitting a packet, the encryption level needs to be specified so
 /// that it is retransmitted at a level which the peer can understand.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]

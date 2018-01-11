@@ -7,7 +7,7 @@ use types::{QuicPacketNumber, QuicVersion};
 pub trait QuicEncrypter {
     /// Writes encrypted `plain_text` and a MAC over `plaintext` and `associated_data` into output.
     /// `packet_number` is appended to the `nonce_prefix` value provided in set_nonce_prefix() to form the nonce.
-    fn encrypt_packet<'p>(
+    fn encrypt_packet(
         &self,
         version: QuicVersion,
         packet_number: QuicPacketNumber,

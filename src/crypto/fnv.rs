@@ -1,4 +1,4 @@
-#![allow(non_upper_case_globals)]
+#![allow(dead_code, non_upper_case_globals)]
 use std::hash::{BuildHasherDefault, Hasher};
 
 use extprim::u128::u128;
@@ -6,19 +6,19 @@ use extprim::u128::u128;
 pub const kPrime: u128 = u128!(309485009821345068724781371);
 pub const kOffset: u128 = u128!(144066263297769815596495629667062367629);
 
-pub fn fnv0<T>(data: T) -> u128
+fn fnv0<T>(data: T) -> u128
 where
     T: AsRef<[u8]>,
 {
     fnv1(u128::zero(), data)
 }
 
-pub fn fnv1<T>(uhash: u128, data: T) -> u128
+fn fnv1<T>(uhash: u128, data: T) -> u128
 where
     T: AsRef<[u8]>,
 {
     data.as_ref().iter().fold(uhash, |hash, &b| {
-        hash.wrapping_mul(kPrime) ^ u128::new(b as u64)
+        hash.wrapping_mul(kPrime) ^ u128::new(u64::from(b))
     })
 }
 
@@ -27,7 +27,7 @@ where
     T: AsRef<[u8]>,
 {
     data.as_ref().iter().fold(uhash, |hash, &b| {
-        (hash ^ u128::new(b as u64)).wrapping_mul(kPrime)
+        (hash ^ u128::new(u64::from(b))).wrapping_mul(kPrime)
     })
 }
 

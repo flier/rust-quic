@@ -23,8 +23,9 @@ pub struct NullEncrypter<P> {
     phantom: PhantomData<P>,
 }
 
-impl<P> NullEncrypter<P> {
-    pub fn new() -> Self {
+impl<P> Default for NullEncrypter<P>
+{
+    fn default() -> Self {
         NullEncrypter {
             phantom: PhantomData,
         }
@@ -35,7 +36,7 @@ impl<P> QuicEncrypter for NullEncrypter<P>
 where
     P: Perspective,
 {
-    fn encrypt_packet<'p>(
+    fn encrypt_packet(
         &self,
         version: QuicVersion,
         _packet_number: QuicPacketNumber,
@@ -64,8 +65,9 @@ pub struct NullDecrypter<P> {
     phantom: PhantomData<P>,
 }
 
-impl<P> NullDecrypter<P> {
-    pub fn new() -> Self {
+impl<P> Default for NullDecrypter<P>
+{
+    fn default() -> Self {
         NullDecrypter {
             phantom: PhantomData,
         }
@@ -80,12 +82,12 @@ where
         Box::new(self)
     }
 
-    fn decrypt_packet<'p>(
+    fn decrypt_packet(
         &self,
         version: QuicVersion,
         _packet_number: QuicPacketNumber,
-        associated_data: &'p [u8],
-        cipher_text: &'p [u8],
+        associated_data: &[u8],
+        cipher_text: &[u8],
     ) -> Result<Bytes, Error> {
         debug!("decrypt {} bytes packet with FNV128", cipher_text.len());
 
@@ -107,7 +109,7 @@ where
 
 named!(
     read_hash<u128>,
-    do_parse!(lo: le_u64 >> hi: le_u32 >> (u128::from_parts(hi as u64, lo)))
+    do_parse!(lo: le_u64 >> hi: le_u32 >> (u128::from_parts(u64::from(hi), lo)))
 );
 
 fn compute_hash<P>(version: QuicVersion, associated_data: &[u8], plain_text: &[u8]) -> u128
@@ -209,7 +211,7 @@ mod tests {
 
     #[test]
     fn null_encrypt_client() {
-        let encrypter = NullEncrypter::<Client>::new();
+        let encrypter = NullEncrypter::<Client>::default();
 
         assert_eq!(
             encrypter
@@ -226,7 +228,7 @@ mod tests {
 
     #[test]
     fn null_encrypt_server() {
-        let encrypter = NullEncrypter::<Server>::new();
+        let encrypter = NullEncrypter::<Server>::default();
 
         assert_eq!(
             encrypter
@@ -243,7 +245,7 @@ mod tests {
 
     #[test]
     fn null_encrypt_client_pre37() {
-        let encrypter = NullEncrypter::<Client>::new();
+        let encrypter = NullEncrypter::<Client>::default();
 
         assert_eq!(
             encrypter
@@ -260,7 +262,7 @@ mod tests {
 
     #[test]
     fn null_encrypt_server_pre37() {
-        let encrypter = NullEncrypter::<Server>::new();
+        let encrypter = NullEncrypter::<Server>::default();
 
         assert_eq!(
             encrypter
@@ -277,7 +279,7 @@ mod tests {
 
     #[test]
     fn null_decrypt_client() {
-        let decrypter = NullDecrypter::<Client>::new();
+        let decrypter = NullDecrypter::<Client>::default();
 
         assert_eq!(
             decrypter
@@ -294,7 +296,7 @@ mod tests {
 
     #[test]
     fn null_decrypt_server() {
-        let decrypter = NullDecrypter::<Server>::new();
+        let decrypter = NullDecrypter::<Server>::default();
 
         assert_eq!(
             decrypter
@@ -311,7 +313,7 @@ mod tests {
 
     #[test]
     fn null_decrypt_client_pre37() {
-        let decrypter = NullDecrypter::<Client>::new();
+        let decrypter = NullDecrypter::<Client>::default();
 
         assert_eq!(
             decrypter
@@ -328,7 +330,7 @@ mod tests {
 
     #[test]
     fn null_decrypt_server_pre37() {
-        let decrypter = NullDecrypter::<Server>::new();
+        let decrypter = NullDecrypter::<Server>::default();
 
         assert_eq!(
             decrypter
@@ -345,7 +347,7 @@ mod tests {
 
     #[test]
     fn null_decrypt_bad_hash() {
-        let decrypter = NullDecrypter::<Client>::new();
+        let decrypter = NullDecrypter::<Client>::default();
 
         assert_matches!(
             decrypter
@@ -365,7 +367,7 @@ mod tests {
 
     #[test]
     fn null_decrypt_short() {
-        let decrypter = NullDecrypter::<Client>::new();
+        let decrypter = NullDecrypter::<Client>::default();
 
         assert_matches!(
             decrypter

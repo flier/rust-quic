@@ -32,7 +32,7 @@ pub const kC255: QuicTag = quic_tag!(b"C255");
 
 /// AES128 + GCM-12
 pub const kAESG: QuicTag = quic_tag!(b"AESG");
-/// ChaCha20 + Poly1305 RFC7539
+/// `ChaCha20` + `Poly1305` RFC7539
 pub const kCC20: QuicTag = quic_tag!(b"CC20");
 
 // Socket receive buffer
@@ -133,13 +133,13 @@ pub const kDHDT: QuicTag = quic_tag!(b"DHDT");
 pub const kCONH: QuicTag = quic_tag!(b"CONH");
 /// Don't invoke FACK on the first ack.
 pub const kLFAK: QuicTag = quic_tag!(b"LFAK");
-/// Support MAX_HEADER_LIST_SIZE settings frame.
+/// Support `MAX_HEADER_LIST_SIZE` settings frame.
 pub const kSMHL: QuicTag = quic_tag!(b"SMHL");
 /// Fix Cubic convex bug.
 pub const kCCVX: QuicTag = quic_tag!(b"CCVX");
-/// Fix CubicBytes quantization.
+/// Fix `CubicBytes` quantization.
 pub const kCBQT: QuicTag = quic_tag!(b"CBQT");
-/// Fix Cubic BetaLastMax bug.
+/// Fix Cubic `BetaLastMax` bug.
 pub const kBLMX: QuicTag = quic_tag!(b"BLMX");
 /// Allow Cubic per-ack-updates.
 pub const kCPAU: QuicTag = quic_tag!(b"CPAU");
@@ -274,9 +274,9 @@ pub const kASAD: QuicTag = quic_tag!(b"ASAD");
 
 // CETV tags
 
-/// ChannelID key
+/// Channel ID key
 pub const kCIDK: QuicTag = quic_tag!(b"CIDK");
-/// ChannelID signature
+/// Channel ID signature
 pub const kCIDS: QuicTag = quic_tag!(b"CIDS");
 
 // Public reset tags
