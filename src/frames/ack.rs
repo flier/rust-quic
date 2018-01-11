@@ -16,13 +16,14 @@ const kLargestAckedOffset: usize = 2;
 const kQuicHasMultipleAckBlocksOffset_Pre40: usize = 5;
 const kQuicHasMultipleAckBlocksOffset: usize = 4;
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct QuicAckFrame {
     /// The highest packet number we've observed from the peer.
     pub largest_observed: QuicPacketNumber,
     /// Time elapsed since largest_observed was received until this Ack frame was sent.
     pub ack_delay_time: QuicTimeDelta,
     /// Vector of <packet_number, time> for when packets arrived.
-    pub received_packet_times: Vec<(QuicPacketNumber, QuicTime)>,
+    pub received_packet_times: Option<Vec<(QuicPacketNumber, QuicTime)>>,
     /// Set of packets.
     pub packets: PacketNumberQueue,
 }
@@ -69,19 +70,14 @@ impl QuicAckFrame {
             ack_block_length,
             largest_acked_length,
         ) {
-            IResult::Done(remaining, (largest_observed, ack_delay_time, received_packet_times, packets)) => {
+            IResult::Done(remaining, frame) => {
                 debug_assert!(
                     remaining.is_empty(),
                     "unfinished ACK frame, {:?}",
                     remaining
                 );
 
-                Ok(QuicAckFrame {
-                    largest_observed,
-                    ack_delay_time,
-                    received_packet_times,
-                    packets,
-                })
+                Ok(frame)
             }
             IResult::Incomplete(needed) => bail!(QuicError::IncompletePacket(needed).context("incomplete ack frame.")),
             IResult::Error(err) => bail!(QuicError::InvalidPacket(err).context("unable to process ack frame.")),
@@ -94,8 +90,7 @@ named_args!(parse_quic_ack_frame(quic_version: QuicVersion,
                                  last_timestamp: QuicTimeDelta,
                                  has_ack_blocks: bool,
                                  ack_block_length: QuicPacketNumberLength,
-                                 largest_acked_length: QuicPacketNumberLength)
-                                 <(u64, Duration, Vec<(QuicPacketNumber, QuicTime)>, PacketNumberQueue)>,
+                                 largest_acked_length: QuicPacketNumberLength)<QuicAckFrame>,
     do_parse!(
         num_ack_blocks_new: cond!(quic_version > QuicVersion::QUIC_VERSION_39 && has_ack_blocks, be_u8) >>
         num_received_packets_new: cond!(quic_version > QuicVersion::QUIC_VERSION_39, be_u8) >>
@@ -104,7 +99,7 @@ named_args!(parse_quic_ack_frame(quic_version: QuicVersion,
         num_ack_blocks_pre40: cond!(quic_version <= QuicVersion::QUIC_VERSION_39 && has_ack_blocks, be_u8) >>
         first_block_length: uint!(quic_version.endianness(), ack_block_length as usize) >>
         first_received: value!(largest_observed + 1 - first_block_length) >>
-        num_ack_blocks: expr_opt!(num_ack_blocks_new.or(num_ack_blocks_pre40)) >>
+        num_ack_blocks: map!(value!(num_ack_blocks_new.or(num_ack_blocks_pre40)), |n| n.unwrap_or(0)) >>
         packet_ranges: many_m_n!(num_ack_blocks as usize, num_ack_blocks as usize,
             tuple!(be_u8, uint!(quic_version.endianness(), ack_block_length as usize))
         ) >>
@@ -112,34 +107,41 @@ named_args!(parse_quic_ack_frame(quic_version: QuicVersion,
         num_received_packets: map!(
             expr_opt!(num_received_packets_new.or(num_received_packets_pre40)), |n| n as usize
         ) >>
-        delta_from_largest_observed: map!(be_u8, |n| n as QuicPacketNumber) >>
-        time_delta_us: u32!(quic_version.endianness()) >>
-        timestamps: many_m_n!(num_received_packets-1, num_received_packets-1,
-            tuple!(be_u8, map!(u16!(quic_version.endianness()), UFloat16::from))
+        timestamps: cond!(
+            num_received_packets > 0,
+            tuple!(
+                map!(be_u8, |n| n as QuicPacketNumber),
+                u32!(quic_version.endianness()),
+                many_m_n!(num_received_packets-1, num_received_packets-1,
+                    tuple!(be_u8, map!(u16!(quic_version.endianness()), UFloat16::from))
+                )
+            )
         ) >>
         (
-            (
+            QuicAckFrame {
                 largest_observed,
-                if ack_delay_time_us == ufloat16::MAX {
+                ack_delay_time: if ack_delay_time_us == ufloat16::MAX {
                     Duration::max_value()
                 } else {
                     Duration::microseconds(ack_delay_time_us.into())
                 },
-                timestamps.into_iter().fold(
-                    (
-                        vec![(largest_observed - delta_from_largest_observed, creation_time + last_timestamp)],
-                        QuicTimeDelta::from_wire(last_timestamp, time_delta_us),
-                    ),
-                    |(mut times, last_timestamp), (delta_from_largest_observed, incremental_time_delta_us)| {
-                        let seq_num = largest_observed - delta_from_largest_observed as u64;
-                        let last_timestamp = last_timestamp + Duration::microseconds(incremental_time_delta_us.into());
+                received_packet_times: timestamps.map(|(delta_from_largest_observed, time_delta_us, timestamps)| {
+                    timestamps.into_iter().fold(
+                        (
+                            vec![(largest_observed - delta_from_largest_observed, creation_time + last_timestamp)],
+                            QuicTimeDelta::from_wire(last_timestamp, time_delta_us),
+                        ),
+                        |(mut times, last_timestamp), (delta_from_largest_observed, incremental_time_delta_us)| {
+                            let seq_num = largest_observed - delta_from_largest_observed as u64;
+                            let timestamp = last_timestamp + Duration::microseconds(incremental_time_delta_us.into());
 
-                        times.push((seq_num, creation_time + last_timestamp));
+                            times.push((seq_num, creation_time + timestamp));
 
-                        (times, last_timestamp)
-                    }
-                ).0,
-                PacketNumberQueue {
+                            (times, timestamp)
+                        }
+                    ).0
+                }),
+                packets: PacketNumberQueue {
                     ranges: packet_ranges.into_iter().fold(
                         (vec![(first_received, largest_observed+1)], first_received),
                         |(mut ranges, mut first_received), (gap, current_block_length)| {
@@ -153,7 +155,7 @@ named_args!(parse_quic_ack_frame(quic_version: QuicVersion,
                         }
                     ).0
                 },
-            )
+            }
         )
     )
 );
@@ -163,6 +165,90 @@ named_args!(parse_quic_ack_frame(quic_version: QuicVersion,
 /// Intended to be used in a sliding window fashion,
 /// where smaller old packet numbers are removed and larger new packet numbers are added,
 /// with the occasional random access.
+#[derive(Clone, Debug, PartialEq)]
 pub struct PacketNumberQueue {
     ranges: Vec<(u64, u64)>,
+}
+
+#[cfg(test)]
+mod tests {
+    use time;
+
+    use super::*;
+
+    const kSmallLargestObserved: QuicPacketNumber = 0x1234;
+
+    #[test]
+    fn test_one_ack_block() {
+        const test_cases: &[(QuicVersion, u8, &[u8])] = &[
+            (
+                QuicVersion::QUIC_VERSION_38,
+                0x45,
+                &[
+                    // largest acked
+                    0x34, 0x12,
+                    // Zero delta time.
+                    0x00, 0x00,
+                    // first ack block length.
+                    0x34, 0x12,
+                    // num timestamps.
+                    0x00,
+                ],
+            ),
+            (
+                QuicVersion::QUIC_VERSION_39,
+                0x45,
+                &[
+                    // largest acked
+                    0x12, 0x34,
+                    // Zero delta time.
+                    0x00, 0x00,
+                    // first ack block length.
+                    0x12, 0x34,
+                    // num timestamps.
+                    0x00,
+                ],
+            ),
+            (
+                QuicVersion::QUIC_VERSION_40,
+                0x45,
+                &[
+                    // num timestamps.
+                    0x00,
+                    // largest acked
+                    0x12, 0x34,
+                    // Zero delta time.
+                    0x00, 0x00,
+                    // first ack block length.
+                    0x12, 0x34,
+                ],
+            ),
+        ];
+
+        let creation_time = time::now().to_timespec();
+        let last_timestamp = QuicTimeDelta::zero();
+        let frame = QuicAckFrame {
+            largest_observed: kSmallLargestObserved,
+            ack_delay_time: QuicTimeDelta::zero(),
+            received_packet_times: None,
+            packets: PacketNumberQueue {
+                ranges: vec![(1, kSmallLargestObserved + 1)],
+            },
+        };
+
+        for &(quic_version, frame_type, packet) in test_cases {
+            assert_eq!(
+                QuicAckFrame::parse(
+                    quic_version,
+                    creation_time,
+                    last_timestamp,
+                    frame_type,
+                    packet
+                ).unwrap(),
+                frame,
+                "parse ACK frame, version {:?}",
+                quic_version,
+            );
+        }
+    }
 }

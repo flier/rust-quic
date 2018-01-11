@@ -207,7 +207,11 @@ fn le_u48(i: &[u8]) -> IResult<&[u8], u64> {
 #[macro_export]
 macro_rules! u48 (
     ($input:expr, $endianness:expr) => (
-        if Endianness::Big == $endianness { be_u48($input) } else { le_u48($input) }
+        if ::nom::Endianness::Big == $endianness {
+            $crate::packet::be_u48($input)
+        } else {
+            $crate::packet::le_u48($input)
+        }
     );
 );
 
