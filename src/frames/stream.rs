@@ -2,9 +2,8 @@
 
 use std::borrow::Cow;
 
-use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use failure::{Error, Fail};
-use nom::{self, Endianness, IResult};
+use nom::{self, IResult};
 
 use errors::QuicError;
 use frames::{kQuicFrameTypeStreamMask, kQuicFrameTypeStreamMask_Pre40};
@@ -33,119 +32,46 @@ const kQuicStreamDataLengthShift: usize = 0;
 const kQuicStreamFinShift_Pre40: usize = 6;
 const kQuicStreamFinShift: usize = 5;
 
-pub trait QuicStreamFrameType {
-    fn stream_id_length(&self) -> usize;
-
-    fn offset_length(&self) -> usize;
-
-    fn has_data_length(&self) -> bool;
-
-    fn is_fin(&self) -> bool;
-}
-
-struct QuicStreamFrameTypeNew(u8);
-
-impl QuicStreamFrameTypeNew {
-    pub fn new(flags: u8) -> Self {
-        QuicStreamFrameTypeNew(flags & !kQuicFrameTypeStreamMask)
-    }
-}
-
-impl QuicStreamFrameType for QuicStreamFrameTypeNew {
-    fn stream_id_length(&self) -> usize {
-        1 + extract_bits(self.0, kQuicStreamIDLengthNumBits, kQuicStreamIDLengthShift) as usize
-    }
-
-    fn offset_length(&self) -> usize {
-        match 1 << extract_bits(self.0, kQuicStreamOffsetNumBits, kQuicStreamOffsetShift) {
-            1 => 0,
-            n => n,
-        }
-    }
-
-    fn has_data_length(&self) -> bool {
-        extract_bool(self.0, kQuicStreamDataLengthShift)
-    }
-
-    fn is_fin(&self) -> bool {
-        extract_bool(self.0, kQuicStreamFinShift)
-    }
-}
-
-struct QuicStreamFrameTypePre40(u8);
-
-impl QuicStreamFrameTypePre40 {
-    pub fn new(flags: u8) -> Self {
-        QuicStreamFrameTypePre40(flags & !kQuicFrameTypeStreamMask_Pre40)
-    }
-}
-
-impl QuicStreamFrameType for QuicStreamFrameTypePre40 {
-    fn stream_id_length(&self) -> usize {
-        1
-            + extract_bits(
-                self.0,
-                kQuicStreamIDLengthNumBits_Pre40,
-                kQuicStreamIdLengthShift_Pre40,
-            ) as usize
-    }
-
-    fn offset_length(&self) -> usize {
-        match extract_bits(
-            self.0,
-            kQuicStreamOffsetNumBits_Pre40,
-            kQuicStreamOffsetShift_Pre40,
-        ) {
-            0 => 0,
-            n => n as usize + 1, // There is no encoding for 1 byte, only 0 and 2 through 8.
-        }
-    }
-
-    fn has_data_length(&self) -> bool {
-        extract_bool(self.0, kQuicStreamDataLengthShift_Pre40)
-    }
-
-    fn is_fin(&self) -> bool {
-        extract_bool(self.0, kQuicStreamFinShift_Pre40)
-    }
-}
-
-fn extract_bits(flags: u8, bits: usize, offset: usize) -> u8 {
-    (flags >> offset) & ((1 << bits) - 1)
-}
-
-fn extract_bool(flags: u8, offset: usize) -> bool {
-    0 != extract_bits(flags, 1, offset)
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct QuicStreamFrame<'a> {
-    stream_id: QuicStreamId,
-    offset: QuicStreamOffset, // Location of this data in the stream.
-    fin: bool,
-    data: Cow<'a, [u8]>,
+    pub stream_id: QuicStreamId,
+    pub offset: QuicStreamOffset, // Location of this data in the stream.
+    pub fin: bool,
+    pub data: Cow<'a, [u8]>,
 }
 
 impl<'a> QuicStreamFrame<'a> {
-    pub fn parse(quic_version: QuicVersion, frame_type: u8, payload: &'a [u8]) -> Result<QuicStreamFrame<'a>, Error>
-    {
+    pub fn parse(quic_version: QuicVersion, frame_type: u8, payload: &'a [u8]) -> Result<QuicStreamFrame<'a>, Error> {
         let (stream_id_length, offset_length, has_data_length, fin) = if quic_version < QuicVersion::QUIC_VERSION_40 {
-            let frame_type = QuicStreamFrameTypePre40::new(frame_type);
-
+            let flags = frame_type & !kQuicFrameTypeStreamMask_Pre40;
             (
-                frame_type.stream_id_length(),
-                frame_type.offset_length(),
-                frame_type.has_data_length(),
-                frame_type.is_fin(),
+                1
+                    + extract_bits!(
+                        flags,
+                        kQuicStreamIDLengthNumBits_Pre40,
+                        kQuicStreamIdLengthShift_Pre40
+                    ) as usize,
+                match extract_bits!(
+                    flags,
+                    kQuicStreamOffsetNumBits_Pre40,
+                    kQuicStreamOffsetShift_Pre40
+                ) {
+                    0 => 0,
+                    n => n as usize + 1, // There is no encoding for 1 byte, only 0 and 2 through 8.
+                },
+                extract_bool!(flags, kQuicStreamDataLengthShift_Pre40),
+                extract_bool!(flags, kQuicStreamFinShift_Pre40),
             )
         } else {
-            let frame_type = QuicStreamFrameTypeNew::new(frame_type);
-
+            let flags = frame_type & !kQuicFrameTypeStreamMask;
             (
-                frame_type.stream_id_length(),
-                frame_type.offset_length(),
-                frame_type.has_data_length(),
-                frame_type.is_fin(),
+                1 + extract_bits!(flags, kQuicStreamIDLengthNumBits, kQuicStreamIDLengthShift) as usize,
+                match 1 << extract_bits!(flags, kQuicStreamOffsetNumBits, kQuicStreamOffsetShift) {
+                    1 => 0,
+                    n => n,
+                },
+                extract_bool!(flags, kQuicStreamDataLengthShift),
+                extract_bool!(flags, kQuicStreamFinShift),
             )
         };
 
@@ -178,31 +104,18 @@ impl<'a> QuicStreamFrame<'a> {
     }
 }
 
-fn uint(input: &[u8], endianness: Endianness, nbytes: usize) -> IResult<&[u8], u64> {
-    if nbytes < 1 || nbytes > 8 {
-        IResult::Error(nom::ErrorKind::Tag)
-    } else if input.len() < nbytes {
-        IResult::Incomplete(nom::Needed::Size(nbytes))
-    } else {
-        let (remaining, value) = match endianness {
-            Endianness::Little => (&input[nbytes..], LittleEndian::read_uint(input, nbytes)),
-            Endianness::Big => (&input[nbytes..], BigEndian::read_uint(input, nbytes)),
-        };
-
-        IResult::Done(remaining, value)
-    }
-}
-
 named_args!(
     parse_quic_stream_frame(quic_version: QuicVersion,
                             stream_id_length: usize,
                             offset_length: usize,
                             has_data_length: bool)<(QuicStreamId, QuicStreamOffset, Option<usize>)>,
         do_parse!(
-            data_len_new: cond!(has_data_length && quic_version > QuicVersion::QUIC_VERSION_39, u16!(quic_version.endianness())) >>
-            stream_id: call!(uint, quic_version.endianness(), stream_id_length) >>
-            offset: call!(uint, quic_version.endianness(), offset_length) >>
-            data_len_pre40: cond!(has_data_length && quic_version <= QuicVersion::QUIC_VERSION_39, u16!(quic_version.endianness())) >>
+            data_len_new: cond!(has_data_length && quic_version > QuicVersion::QUIC_VERSION_39,
+                                u16!(quic_version.endianness())) >>
+            stream_id: uint!(quic_version.endianness(), stream_id_length) >>
+            offset: uint!(quic_version.endianness(), offset_length) >>
+            data_len_pre40: cond!(has_data_length && quic_version <= QuicVersion::QUIC_VERSION_39,
+                                  u16!(quic_version.endianness())) >>
         (
             (
                 stream_id as QuicStreamId,

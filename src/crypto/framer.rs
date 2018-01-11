@@ -33,6 +33,12 @@ where
     {
         let (remaining, message) = CryptoHandshakeMessage::parse(input)?;
 
+        debug_assert!(
+            remaining.is_empty(),
+            "unfinished handshake message, {:?}",
+            remaining
+        );
+
         self.visitor.on_handshake_message(message);
 
         Ok(())

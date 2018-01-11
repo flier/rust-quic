@@ -16,6 +16,7 @@ extern crate log;
 #[macro_use]
 extern crate nom;
 extern crate ring;
+extern crate time;
 
 #[cfg(test)]
 extern crate hex;
@@ -32,9 +33,11 @@ mod types;
 mod tag;
 mod version;
 mod sockaddr;
-mod frames;
-pub mod crypto;
+#[macro_use]
 mod packet;
+pub mod crypto;
+#[macro_use]
+mod frames;
 mod framer;
 
 pub use framer::{QuicFramer, QuicFramerVisitor};

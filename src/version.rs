@@ -2,9 +2,9 @@
 
 use std::str::FromStr;
 
+use byteorder::{NativeEndian, NetworkEndian};
 use failure::Error;
 use nom::Endianness;
-use byteorder::{NativeEndian, NetworkEndian};
 
 use errors::QuicError;
 use tag::QuicTag;

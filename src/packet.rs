@@ -4,21 +4,28 @@ use std::net::SocketAddr;
 use std::ops::Deref;
 use std::str::FromStr;
 
-use byteorder::{ByteOrder};
+use byteorder::ByteOrder;
 use bytes::Bytes;
 use failure::{Error, Fail};
 use nom::{IResult, Needed, be_u64, be_u8};
 
 use constants::{kPublicFlagsSize, kQuicVersionSize};
 use errors::QuicError;
-use types::{QuicConnectionId, ToEndianness, QuicDiversificationNonce, QuicPacketNumber, QuicPublicResetNonceProof};
-use version::{QuicVersion};
+use types::{QuicConnectionId, QuicDiversificationNonce, QuicPacketNumber, QuicPublicResetNonceProof, ToEndianness};
+use version::QuicVersion;
 
 const kPublicHeaderConnectionIdSize: usize = 8;
 
 /// kDiversificationNonceSize is the size, in bytes, of the nonce
 /// that a server may set in the packet header to ensure that its INITIAL keys are not duplicated.
 const kDiversificationNonceSize: usize = 32;
+
+pub type QuicPacketNumberLengthFlags = u8;
+
+const PACKET_FLAGS_1BYTE_PACKET: QuicPacketNumberLengthFlags = 0; // 00
+const PACKET_FLAGS_2BYTE_PACKET: QuicPacketNumberLengthFlags = 1; // 01
+const PACKET_FLAGS_4BYTE_PACKET: QuicPacketNumberLengthFlags = 1 << 1; // 10
+const PACKET_FLAGS_8BYTE_PACKET: QuicPacketNumberLengthFlags = 1 << 1 | 1; // 11
 
 pub type QuicPacketNumberLength = u8;
 
@@ -29,12 +36,22 @@ const PACKET_4BYTE_PACKET_NUMBER: QuicPacketNumberLength = 4;
 const PACKET_6BYTE_PACKET_NUMBER: QuicPacketNumberLength = 6;
 const PACKET_8BYTE_PACKET_NUMBER: QuicPacketNumberLength = 8;
 
-pub type QuicPacketNumberLengthFlags = u8;
-
-const PACKET_FLAGS_1BYTE_PACKET: QuicPacketNumberLengthFlags = 0; // 00
-const PACKET_FLAGS_2BYTE_PACKET: QuicPacketNumberLengthFlags = 1; // 01
-const PACKET_FLAGS_4BYTE_PACKET: QuicPacketNumberLengthFlags = 1 << 1; // 10
-const PACKET_FLAGS_8BYTE_PACKET: QuicPacketNumberLengthFlags = 1 << 1 | 1; // 11
+pub fn read_ack_packet_number_length(
+    version: QuicVersion,
+    flags: QuicPacketNumberLengthFlags,
+) -> QuicPacketNumberLength {
+    match flags & PACKET_FLAGS_8BYTE_PACKET {
+        PACKET_FLAGS_8BYTE_PACKET => if version <= QuicVersion::QUIC_VERSION_39 {
+            PACKET_6BYTE_PACKET_NUMBER
+        } else {
+            PACKET_8BYTE_PACKET_NUMBER
+        },
+        PACKET_FLAGS_4BYTE_PACKET => PACKET_4BYTE_PACKET_NUMBER,
+        PACKET_FLAGS_2BYTE_PACKET => PACKET_2BYTE_PACKET_NUMBER,
+        PACKET_FLAGS_1BYTE_PACKET => PACKET_1BYTE_PACKET_NUMBER,
+        _ => PACKET_6BYTE_PACKET_NUMBER,
+    }
+}
 
 /// Number of bits the packet number length bits are shifted from the right edge of the public header.
 const kPublicHeaderSequenceNumberShift: u8 = 4;
@@ -188,7 +205,35 @@ fn le_u48(i: &[u8]) -> IResult<&[u8], u64> {
 }
 
 #[macro_export]
-macro_rules! u48 ( ($i:expr, $e:expr) => ( {if Endianness::Big == $e { be_u48($i) } else { le_u48($i) } } ););
+macro_rules! u48 (
+    ($input:expr, $endianness:expr) => (
+        if Endianness::Big == $endianness { be_u48($input) } else { le_u48($input) }
+    );
+);
+
+#[macro_export]
+macro_rules! uint (
+    ($input:expr, $endianness:expr, $nbytes:expr) => (
+        if $nbytes < 1 || $nbytes > 8 {
+            ::nom::IResult::Error(::nom::ErrorKind::Tag)
+        } else if $input.len() < $nbytes {
+            ::nom::IResult::Incomplete(::nom::Needed::Size($nbytes))
+        } else {
+            use byteorder::ByteOrder;
+
+            let (remaining, value) = match $endianness {
+                ::nom::Endianness::Little => (
+                    &$input[$nbytes..], ::byteorder::LittleEndian::read_uint($input, $nbytes)
+                ),
+                ::nom::Endianness::Big => (
+                    &$input[$nbytes..], ::byteorder::BigEndian::read_uint($input, $nbytes)
+                ),
+            };
+
+            ::nom::IResult::Done(remaining, value)
+        }
+    );
+);
 
 named_args!(parse_public_header(is_server: bool)<QuicPacketPublicHeader>,
     do_parse!(

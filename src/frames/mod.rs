@@ -1,8 +1,24 @@
 #![allow(non_upper_case_globals)]
 
-mod stream;
+#[macro_export]
+macro_rules! extract_bits {
+    ($flags:expr, $bits:expr, $offset:expr) => {
+        ($flags >> $offset) & ((1 << $bits) - 1)
+    };
+}
 
-pub use self::stream::{QuicStreamFrame, QuicStreamFrameType};
+#[macro_export]
+macro_rules! extract_bool {
+    ($flags:expr, $offset:expr) => {
+        0 != extract_bits!($flags, 1, $offset)
+    };
+}
+
+mod stream;
+mod ack;
+
+pub use self::ack::{PacketNumberQueue, QuicAckFrame};
+pub use self::stream::QuicStreamFrame;
 
 use version::QuicVersion;
 

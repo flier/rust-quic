@@ -1,6 +1,5 @@
 use std::cmp;
 use std::mem;
-use std::time::Instant;
 
 use byteorder::{ByteOrder, NativeEndian, NetworkEndian};
 use bytes::Bytes;
@@ -10,12 +9,12 @@ use nom::IResult;
 use constants::kMaxPacketSize;
 use crypto::{CryptoHandshakeMessage, NullDecrypter, QuicDecrypter, kCADR, kPRST, kRNON};
 use errors::QuicError;
-use frames::{is_stream_frame, QuicStreamFrame, kQuicFrameTypeSpecialMask};
+use frames::{is_ack_frame, is_stream_frame, QuicAckFrame, QuicStreamFrame, kQuicFrameTypeSpecialMask};
 use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketPublicHeader, QuicPublicResetPacket,
              QuicVersionNegotiationPacket};
 use sockaddr::socket_address;
-use types::{EncryptionLevel, Perspective, QuicPacketNumber, ToEndianness};
-use version::{QuicVersion};
+use types::{EncryptionLevel, Perspective, QuicPacketNumber, QuicTime, QuicTimeDelta, ToEndianness, ToQuicPacketNumber};
+use version::QuicVersion;
 
 pub trait QuicFramerVisitor {
     /// Called when a new packet has been received, before it has been validated or processed.
@@ -49,7 +48,14 @@ pub trait QuicFramerVisitor {
     fn on_packet_header(&self, header: &QuicPacketHeader) -> bool;
 
     /// Called when a `QuicStreamFrame` has been parsed.
+    ///
+    /// If `on_stream_frame` returns false, the framer will stop parsing the current packet.
     fn on_stream_frame(&self, frame: QuicStreamFrame) -> bool;
+
+    /// Called when a AckFrame has been parsed.
+    ///
+    /// If `on_ack_frame` returns false, the framer will stop parsing the current packet.
+    fn on_ack_frame(&self, frame: QuicAckFrame) -> bool;
 
     /// Called when a packet has been completely processed.
     fn on_packet_complete(&self);
@@ -61,7 +67,6 @@ pub trait QuicFramerVisitor {
 pub struct QuicFramer<'a, V> {
     supported_versions: &'a [QuicVersion],
     quic_version: QuicVersion,
-    creation_time: Instant,
     visitor: V,
     /// Updated by `process_packet_header` when it succeeds.
     last_packet_number: QuicPacketNumber,
@@ -79,17 +84,22 @@ pub struct QuicFramer<'a, V> {
     /// when `alternative_decrypter` successfully decrypts a packet,
     /// we should install it as the only decrypter.
     alternative_decrypter_latch: bool,
+    /// The time this framer was created.
+    /// Time written to the wire will be written as a delta from this value.
+    creation_time: QuicTime,
+    /// The time delta computed for the last timestamp frame.
+    /// This is relative to the creation_time.
+    last_timestamp: QuicTimeDelta,
 }
 
 impl<'a, V> QuicFramer<'a, V> {
-    pub fn new<P>(supported_versions: &'a [QuicVersion], creation_time: Instant, visitor: V) -> Self
+    pub fn new<P>(supported_versions: &'a [QuicVersion], creation_time: QuicTime, visitor: V) -> Self
     where
         P: 'static + Perspective,
     {
         QuicFramer {
             supported_versions,
             quic_version: supported_versions[0],
-            creation_time,
             visitor,
             last_packet_number: 0,
             largest_packet_number: 0,
@@ -98,6 +108,8 @@ impl<'a, V> QuicFramer<'a, V> {
             decrypter_level: EncryptionLevel::None,
             alternative_decrypter_level: EncryptionLevel::None,
             alternative_decrypter_latch: false,
+            creation_time,
+            last_timestamp: QuicTimeDelta::zero(),
         }
     }
 
@@ -149,13 +161,11 @@ where
     where
         P: Perspective,
     {
-        let remaining = if self.quic_version > QuicVersion::QUIC_VERSION_38 {
+        if self.quic_version > QuicVersion::QUIC_VERSION_38 {
             self.parse_packet::<P, NetworkEndian>(packet)
         } else {
             self.parse_packet::<P, NativeEndian>(packet)
-        };
-
-        Ok(())
+        }
     }
 
     fn parse_packet<'p, P, E>(&mut self, packet: &'p EncryptedPacket) -> Result<(), Error>
@@ -166,7 +176,7 @@ where
         self.visitor.on_packet();
 
         // First parse the public header.
-        let (remaining, public_header) = QuicPacketPublicHeader::parse::<E>(packet, P::is_server())?;
+        let (payload, public_header) = QuicPacketPublicHeader::parse::<E>(packet, P::is_server())?;
 
         if public_header.reset_flag && public_header.versions.is_some() {
             bail!("Got version flag in reset packet");
@@ -182,11 +192,11 @@ where
         }) {
             Ok(())
         } else if !P::is_server() && public_header.versions.as_ref().is_some() {
-            self.process_version_negotiation_packet(remaining, public_header)
+            self.process_version_negotiation_packet(payload, public_header)
         } else if public_header.reset_flag {
-            self.process_public_reset_packet(remaining, public_header)
+            self.process_public_reset_packet(payload, public_header)
         } else {
-            self.process_data_packet::<P, E>(remaining, public_header, packet)
+            self.process_data_packet::<P, E>(payload, public_header, packet)
         }
     }
 
@@ -212,6 +222,12 @@ where
         public_header: QuicPacketPublicHeader<'p>,
     ) -> Result<(), Error> {
         let (remaining, message) = CryptoHandshakeMessage::parse(input).context("unable to read reset message")?;
+
+        debug_assert!(
+            remaining.is_empty(),
+            "unfinished reset message, {:?}",
+            remaining
+        );
 
         if message.tag() != kPRST {
             bail!("Incorrect message tag: {}.", message.tag());
@@ -314,42 +330,9 @@ where
     {
         let wire_packet_number = E::read_uint(input, packet_number_length);
 
-        let packet_number =
-            self.calculate_packet_number_from_wire(packet_number_length, base_packet_number, wire_packet_number);
+        let packet_number = QuicPacketNumber::from_wire(packet_number_length, base_packet_number, wire_packet_number);
 
         return Ok((&input[packet_number_length..], packet_number));
-    }
-
-    fn calculate_packet_number_from_wire(
-        &self,
-        packet_number_length: usize,
-        base_packet_number: QuicPacketNumber,
-        packet_number: QuicPacketNumber,
-    ) -> QuicPacketNumber {
-        // The new packet number might have wrapped to the next epoch, or
-        // it might have reverse wrapped to the previous epoch, or it might
-        // remain in the same epoch.  Select the packet number closest to the
-        // next expected packet number, the previous packet number plus 1.
-
-        // epoch_delta is the delta between epochs the packet number was serialized
-        // with, so the correct value is likely the same epoch as the last sequence
-        // number or an adjacent epoch.
-        let epoch_delta = 1 << (8 * packet_number_length);
-
-        let next_packet_number = base_packet_number + 1;
-        let epoch = base_packet_number & !(epoch_delta - 1);
-        let prev_epoch = epoch - epoch_delta;
-        let next_epoch = epoch + epoch_delta;
-
-        return closest_to(
-            next_packet_number,
-            epoch + packet_number,
-            closest_to(
-                next_packet_number,
-                prev_epoch + packet_number,
-                next_epoch + packet_number,
-            ),
-        );
     }
 
     fn decrypt_payload<'p, P>(
@@ -422,9 +405,8 @@ where
         self.largest_packet_number = cmp::max(self.largest_packet_number, header.packet_number);
     }
 
-    fn process_frame_data(&self, payload: &[u8], header: QuicPacketHeader) -> Result<(), Error>
-    {
-        while let Some((frame_type, remaining)) = payload.split_first() {
+    fn process_frame_data(&self, payload: &[u8], header: QuicPacketHeader) -> Result<(), Error> {
+        while let Some((frame_type, payload)) = payload.split_first() {
             let frame_type = *frame_type;
 
             if (frame_type & kQuicFrameTypeSpecialMask) == 0 {
@@ -432,38 +414,37 @@ where
             }
 
             if is_stream_frame(self.quic_version, frame_type) {
-                let frame = self.process_stream_frame(remaining, frame_type)?;
+                let frame = QuicStreamFrame::parse(self.quic_version, frame_type, payload)?;
 
                 if !self.visitor.on_stream_frame(frame) {
                     debug!("Visitor asked to stop further processing.");
 
                     return Ok(());
                 }
+
+                continue;
+            }
+
+            if is_ack_frame(self.quic_version, frame_type) {
+                let frame = QuicAckFrame::parse(
+                    self.quic_version,
+                    self.creation_time,
+                    self.last_timestamp,
+                    frame_type,
+                    payload,
+                )?;
+
+                if !self.visitor.on_ack_frame(frame) {
+                    debug!("Visitor asked to stop further processing.");
+
+                    return Ok(());
+                }
+
+                continue;
             }
         }
 
         Ok(())
-    }
-
-    fn process_stream_frame<'p>(&self, payload: &'p [u8], frame_type: u8) -> Result<QuicStreamFrame<'p>, Error>
-    {
-        QuicStreamFrame::parse(self.quic_version, frame_type, payload)
-    }
-}
-
-fn delta(a: QuicPacketNumber, b: QuicPacketNumber) -> QuicPacketNumber {
-    if a < b {
-        b - a
-    } else {
-        a - b
-    }
-}
-
-fn closest_to(target: QuicPacketNumber, a: QuicPacketNumber, b: QuicPacketNumber) -> QuicPacketNumber {
-    if delta(target, a) < delta(target, b) {
-        a
-    } else {
-        b
     }
 }
 
