@@ -4,7 +4,7 @@ use time::Duration;
 
 use errors::QuicError;
 use packet::{read_ack_packet_number_length, QuicPacketNumberLength};
-use types::{QuicPacketNumber, QuicTime, QuicTimeDelta, ToQuicTimeDelta, UFloat16};
+use types::{QuicPacketNumber, QuicTime, QuicTimeDelta, ToQuicTimeDelta, UFloat16, ufloat16};
 use version::QuicVersion;
 
 // packet number size shift used in AckFrames.
@@ -120,7 +120,7 @@ named_args!(parse_quic_ack_frame(quic_version: QuicVersion,
         (
             (
                 largest_observed,
-                if ack_delay_time_us == UFloat16::max_value() {
+                if ack_delay_time_us == ufloat16::MAX {
                     Duration::max_value()
                 } else {
                     Duration::microseconds(ack_delay_time_us.into())

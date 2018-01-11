@@ -1,156 +1,6 @@
-#![allow(dead_code, non_upper_case_globals)]
+#![allow(non_upper_case_globals)]
 
-use std::ops::Sub;
 use std::u16;
-
-use byteorder::{BigEndian, LittleEndian};
-use nom::Endianness;
-use time::{Duration, Timespec};
-
-pub type QuicPacketLength = u16;
-pub type QuicHeaderId = u32;
-pub type QuicStreamId = u32;
-pub type QuicByteCount = u64;
-pub type QuicConnectionId = u64;
-pub type QuicPacketCount = u64;
-pub type QuicPacketNumber = u64;
-pub type QuicPublicResetNonceProof = u64;
-pub type QuicStreamOffset = u64;
-pub type QuicDiversificationNonce = [u8; 32];
-pub type QuicTime = Timespec;
-pub type QuicTimeDelta = Duration;
-
-pub trait ToQuicPacketNumber {
-    fn from_wire(
-        packet_number_length: usize,
-        base_packet_number: QuicPacketNumber,
-        packet_number: QuicPacketNumber,
-    ) -> Self;
-}
-
-impl ToQuicPacketNumber for QuicPacketNumber {
-    fn from_wire(
-        packet_number_length: usize,
-        base_packet_number: QuicPacketNumber,
-        packet_number: QuicPacketNumber,
-    ) -> Self {
-        // The new packet number might have wrapped to the next epoch, or
-        // it might have reverse wrapped to the previous epoch, or it might
-        // remain in the same epoch.  Select the packet number closest to the
-        // next expected packet number, the previous packet number plus 1.
-
-        // epoch_delta is the delta between epochs the packet number was serialized
-        // with, so the correct value is likely the same epoch as the last sequence
-        // number or an adjacent epoch.
-        let epoch_delta = 1 << (8 * packet_number_length);
-
-        let next_packet_number = base_packet_number + 1;
-        let epoch = base_packet_number & !(epoch_delta - 1);
-        let prev_epoch = epoch.wrapping_sub(epoch_delta);
-        let next_epoch = epoch.wrapping_add(epoch_delta);
-
-        closest_to(
-            next_packet_number,
-            epoch + packet_number,
-            closest_to(
-                next_packet_number,
-                prev_epoch + packet_number,
-                next_epoch + packet_number,
-            ),
-        )
-    }
-}
-
-pub trait ToQuicTimeDelta {
-    fn from_wire(last_timestamp: Duration, time_delta_us: u32) -> Self;
-}
-
-impl ToQuicTimeDelta for QuicTimeDelta {
-    fn from_wire(last_timestamp: Duration, time_delta_us: u32) -> Self {
-        // The new time_delta might have wrapped to the next epoch, or it
-        // might have reverse wrapped to the previous epoch, or it might
-        // remain in the same epoch. Select the time closest to the previous
-        // time.
-        //
-        // epoch_delta is the delta between epochs. A delta is 4 bytes of
-        // microseconds.
-        let epoch_delta = 1 << 32;
-
-        Duration::microseconds(
-            if let Some(last_timestamp) = last_timestamp.num_microseconds() {
-                let epoch = last_timestamp & !(epoch_delta - 1);
-                // Wrapping is safe here because a wrapped value will not be ClosestTo below.
-                let prev_epoch = epoch.wrapping_sub(epoch_delta);
-                let next_epoch = epoch.wrapping_add(epoch_delta);
-
-                closest_to(
-                    last_timestamp,
-                    epoch + time_delta_us as i64,
-                    closest_to(
-                        last_timestamp,
-                        prev_epoch + time_delta_us as i64,
-                        next_epoch + time_delta_us as i64,
-                    ),
-                )
-            } else {
-                time_delta_us as i64
-            },
-        )
-    }
-}
-
-fn delta<T>(a: T, b: T) -> <T as Sub>::Output
-where
-    T: PartialOrd + Sub + Copy,
-{
-    if a < b {
-        b - a
-    } else {
-        a - b
-    }
-}
-
-fn closest_to<T>(target: T, a: T, b: T) -> T
-where
-    T: PartialOrd + Sub + Copy,
-    <T as Sub>::Output: PartialOrd,
-{
-    if delta(target, a) < delta(target, b) {
-        a
-    } else {
-        b
-    }
-}
-
-/// EncryptionLevel enumerates the stages of encryption that a QUIC connection progresses through.
-/// When retransmitting a packet, the encryption level needs to be specified so
-/// that it is retransmitted at a level which the peer can understand.
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
-pub enum EncryptionLevel {
-    None,
-    Initial,
-    ForwardSecure,
-}
-
-pub trait Perspective {
-    fn is_server() -> bool;
-}
-
-pub trait ToEndianness {
-    fn endianness() -> Endianness;
-}
-
-impl ToEndianness for LittleEndian {
-    fn endianness() -> Endianness {
-        Endianness::Little
-    }
-}
-
-impl ToEndianness for BigEndian {
-    fn endianness() -> Endianness {
-        Endianness::Big
-    }
-}
 
 /// We define an unsigned 16-bit floating point value, inspired by IEEE floats
 /// (http://en.wikipedia.org/wiki/Half_precision_floating-point_format),
@@ -168,18 +18,21 @@ const kUFloat16MantissaBits: usize = 16 - kUFloat16ExponentBits; // 11
 const kUFloat16MantissaEffectiveBits: usize = kUFloat16MantissaBits + 1; // 12
 const kUFloat16MaxValue: u64 = ((1u64 << kUFloat16MantissaEffectiveBits) - 1) << kUFloat16MaxExponent; // 0x3FFC0000000
 
+pub const MAX: UFloat16 = UFloat16(kUFloat16MaxValue);
+pub const MIN: UFloat16 = UFloat16(0);
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
 pub struct UFloat16(u64);
 
 impl UFloat16 {
     /// Returns the smallest value that can be represented by this integer type.
     pub fn min_value() -> Self {
-        UFloat16(0)
+        MIN
     }
 
     /// Returns the largest value that can be represented by this integer type.
     pub fn max_value() -> Self {
-        UFloat16(kUFloat16MaxValue)
+        MAX
     }
 }
 
