@@ -70,15 +70,7 @@ impl QuicAckFrame {
             ack_block_length,
             largest_acked_length,
         ) {
-            IResult::Done(remaining, frame) => {
-                debug_assert!(
-                    remaining.is_empty(),
-                    "unfinished ACK frame, {:?}",
-                    remaining
-                );
-
-                Ok((frame, remaining))
-            }
+            IResult::Done(remaining, frame) => Ok((frame, remaining)),
             IResult::Incomplete(needed) => bail!(IncompletePacket(needed).context("incomplete ack frame.")),
             IResult::Error(err) => bail!(QuicError::from(err).context("unable to process ack frame.")),
         }

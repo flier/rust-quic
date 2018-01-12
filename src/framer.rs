@@ -14,7 +14,8 @@ use constants::kMaxPacketSize;
 use crypto::{CryptoHandshakeMessage, NullDecrypter, QuicDecrypter, kCADR, kPRST, kRNON};
 use errors::QuicError;
 use errors::QuicError::*;
-use frames::{is_ack_frame, is_regular_frame, is_stream_frame, QuicAckFrame, QuicPaddingFrame, QuicStreamFrame};
+use frames::{is_ack_frame, is_regular_frame, is_stream_frame, QuicAckFrame, QuicPaddingFrame, QuicRstStreamFrame,
+             QuicStreamFrame};
 use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketPublicHeader, QuicPublicResetPacket,
              QuicVersionNegotiationPacket};
 use types::{EncryptionLevel, Perspective, QuicFrameType, QuicPacketNumber, QuicTime, QuicTimeDelta, QuicVersion,
@@ -63,6 +64,9 @@ pub trait QuicFramerVisitor {
 
     /// Called when a QuicPaddingFrame has been parsed.
     fn on_padding_frame(&self, frame: QuicPaddingFrame) -> bool;
+
+    /// Called when a RstStreamFrame has been parsed.
+    fn on_reset_stream_frame(&self, frame: QuicRstStreamFrame) -> bool;
 
     /// Called when a packet has been completely processed.
     fn on_packet_complete(&self);
@@ -442,7 +446,17 @@ where
                                 return Ok(());
                             }
                         }
-                        QuicFrameType::ResetStream => {}
+                        QuicFrameType::ResetStream => {
+                            let (frame, remaining) = QuicRstStreamFrame::parse(self.quic_version, remaining)?;
+
+                            payload = remaining;
+
+                            if !self.visitor.on_reset_stream_frame(frame) {
+                                debug!("Visitor asked to stop further processing.");
+
+                                return Ok(());
+                            }
+                        }
                         QuicFrameType::ConnectionClose => {}
                         QuicFrameType::GoAway => {}
                         QuicFrameType::WindowUpdate => {}

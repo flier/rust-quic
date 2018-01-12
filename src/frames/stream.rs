@@ -144,7 +144,7 @@ mod tests {
     const kStreamOffset: QuicStreamOffset = 0xBA98FEDC32107654;
 
     #[test]
-    fn parse_frame() {
+    fn parse_stream_frame() {
         #[cfg_attr(rustfmt, rustfmt_skip)]
         const test_cases: &[(QuicVersion, u8, &[u8])] = &[
             (

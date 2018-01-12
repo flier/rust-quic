@@ -17,9 +17,11 @@ macro_rules! extract_bool {
 mod stream;
 mod ack;
 mod padding;
+mod reset;
 
 pub use self::ack::{PacketNumberQueue, QuicAckFrame};
 pub use self::padding::QuicPaddingFrame;
+pub use self::reset::{QuicRstStreamErrorCode, QuicRstStreamFrame};
 pub use self::stream::QuicStreamFrame;
 
 use types::QuicVersion;
