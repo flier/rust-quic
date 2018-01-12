@@ -1,8 +1,8 @@
 use failure::{Error, Fail};
-use nom::{IResult, be_u8};
+use nom::{self, IResult, be_u8};
 use time::Duration;
 
-use errors::QuicError;
+use errors::{ParseError, QuicError};
 use packet::{read_ack_packet_number_length, QuicPacketNumberLength};
 use types::{QuicPacketNumber, QuicTime, QuicTimeDelta, QuicVersion, ToQuicTimeDelta, UFloat16, ufloat16};
 
@@ -78,8 +78,8 @@ impl QuicAckFrame {
 
                 Ok(frame)
             }
-            IResult::Incomplete(needed) => bail!(QuicError::IncompletePacket(needed).context("incomplete ack frame.")),
-            IResult::Error(err) => bail!(QuicError::InvalidPacket(err).context("unable to process ack frame.")),
+            IResult::Incomplete(needed) => bail!(QuicError::from(needed).context("incomplete ack frame.")),
+            IResult::Error(err) => bail!(QuicError::from(err).context("unable to process ack frame.")),
         }
     }
 }
@@ -96,11 +96,25 @@ named_args!(parse_quic_ack_frame(quic_version: QuicVersion,
         largest_observed: uint!(quic_version.endianness(), largest_acked_length as usize) >>
         ack_delay_time_us: map!(u16!(quic_version.endianness()), UFloat16::from) >>
         num_ack_blocks_pre40: cond!(quic_version <= QuicVersion::QUIC_VERSION_39 && has_ack_blocks, be_u8) >>
-        first_block_length: uint!(quic_version.endianness(), ack_block_length as usize) >>
+        first_block_length: verify!(
+            uint!(quic_version.endianness(), ack_block_length as usize),
+            |first_block_length| first_block_length < largest_observed + 1
+        ) >>
         first_received: value!(largest_observed + 1 - first_block_length) >>
         num_ack_blocks: map!(value!(num_ack_blocks_new.or(num_ack_blocks_pre40)), |n| n.unwrap_or(0)) >>
         packet_ranges: many_m_n!(num_ack_blocks as usize, num_ack_blocks as usize,
-            tuple!(be_u8, uint!(quic_version.endianness(), ack_block_length as usize))
+            tuple!(map!(be_u8, u64::from), uint!(quic_version.endianness(), ack_block_length as usize))
+        ) >>
+        _packet_ranges_overflow: add_return_error!(
+            nom::ErrorKind::Custom(ParseError::AckBlockOverflow as u32),
+            verify!(value!(&packet_ranges),
+                |ranges: &[(u64, u64)]| {
+                    ranges
+                        .iter()
+                        .fold(0, |acc, &(gap, current_block_length)| acc + gap + current_block_length)
+                    < first_received
+                }
+            )
         ) >>
         num_received_packets_pre40: cond!(quic_version <= QuicVersion::QUIC_VERSION_39, be_u8) >>
         num_received_packets: map!(
@@ -141,10 +155,10 @@ named_args!(parse_quic_ack_frame(quic_version: QuicVersion,
                     ).0
                 }),
                 packets: PacketNumberQueue {
-                    ranges: packet_ranges.into_iter().fold(
+                    ranges: packet_ranges.iter().fold(
                         (vec![(first_received, largest_observed+1)], first_received),
-                        |(mut ranges, mut first_received), (gap, current_block_length)| {
-                            first_received -= u64::from(gap) + current_block_length;
+                        |(mut ranges, mut first_received), &(gap, current_block_length)| {
+                            first_received -= gap + current_block_length;
 
                             if current_block_length > 0 {
                                 ranges.push((first_received, first_received + current_block_length))
@@ -246,6 +260,71 @@ mod tests {
                 ).unwrap(),
                 frame,
                 "parse ACK frame, version {:?}",
+                quic_version,
+            );
+        }
+    }
+
+    #[test]
+    fn overflow() {
+        const test_cases: &[(QuicVersion, u8, &[u8])] = &[
+            (
+                QuicVersion::QUIC_VERSION_38,
+                0x45,
+                &[
+                    // largest acked
+                    0x34, 0x12,
+                    // Zero delta time.
+                    0x00, 0x00,
+                    // first ack block length.
+                    0x88, 0x88,
+                    // num timestamps.
+                    0x00,
+                ],
+            ),
+            (
+                QuicVersion::QUIC_VERSION_39,
+                0x45,
+                &[
+                    // largest acked
+                    0x12, 0x34,
+                    // Zero delta time.
+                    0x00, 0x00,
+                    // first ack block length.
+                    0x88, 0x88,
+                    // num timestamps.
+                    0x00,
+                ],
+            ),
+            (
+                QuicVersion::QUIC_VERSION_40,
+                0x45,
+                &[
+                    // num timestamps.
+                    0x00,
+                    // largest acked
+                    0x12, 0x34,
+                    // Zero delta time.
+                    0x00, 0x00,
+                    // first ack block length.
+                    0x88, 0x88,
+                ],
+            ),
+        ];
+
+        let creation_time = time::now().to_timespec();
+        let last_timestamp = QuicTimeDelta::zero();
+
+        for &(quic_version, frame_type, packet) in test_cases {
+            assert!(
+                QuicAckFrame::parse(
+                    quic_version,
+                    creation_time,
+                    last_timestamp,
+                    frame_type,
+                    packet
+                ).is_err(),
+                "parse ACK frame with overflow block length, version {:?}",
                 quic_version,
             );
         }

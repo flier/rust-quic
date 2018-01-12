@@ -1,11 +1,14 @@
+#![allow(non_snake_case)]
+
 use extprim::u128::u128;
-use nom::{self, IError, Needed};
+use nom::{self, IError};
+use num::FromPrimitive;
 
 use types::QuicTag;
 
-#[derive(Debug, Fail)]
+#[derive(Debug, Fail, PartialEq)]
 pub enum QuicError {
-    #[fail(display = "incomlete packet")] IncompletePacket(Needed),
+    #[fail(display = "incomlete packet")] IncompletePacket(nom::Needed),
 
     #[fail(display = "invalid packet, {}", _0)] InvalidPacket(#[cause] nom::Err),
 
@@ -32,6 +35,8 @@ pub enum QuicError {
     #[fail(display = "tags {} out of order", _0)] TagOutOfOrder(QuicTag),
 
     #[fail(display = "offset {} out of order", _0)] OffsetOutOfOrder(usize),
+
+    #[fail(display = "underflow with ack block length")] AckBlockOverflow,
 }
 
 impl From<IError> for QuicError {
@@ -41,4 +46,28 @@ impl From<IError> for QuicError {
             IError::Incomplete(needed) => QuicError::IncompletePacket(needed),
         }
     }
+}
+
+impl From<nom::Needed> for QuicError {
+    fn from(needed: nom::Needed) -> Self {
+        QuicError::IncompletePacket(needed)
+    }
+}
+
+impl From<nom::ErrorKind> for QuicError {
+    fn from(err: nom::ErrorKind) -> Self {
+        match err {
+            nom::ErrorKind::Custom(code) => match ParseError::from_u32(code) {
+                Some(ParseError::AckBlockOverflow) => QuicError::AckBlockOverflow,
+                None => QuicError::InvalidPacket(err),
+            },
+            _ => QuicError::InvalidPacket(err),
+        }
+    }
+}
+
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, FromPrimitive, PartialEq)]
+pub enum ParseError {
+    AckBlockOverflow,
 }
