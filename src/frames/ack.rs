@@ -190,6 +190,7 @@ mod tests {
     use super::*;
 
     const kSmallLargestObserved: QuicPacketNumber = 0x1234;
+    const kLargeLargestObserved: QuicPacketNumber = 0x123456789abc;
 
     #[test]
     fn one_ack_block() {
@@ -325,6 +326,85 @@ mod tests {
                     packet
                 ).is_err(),
                 "parse ACK frame with overflow block length, version {:?}",
+                quic_version,
+            );
+        }
+    }
+
+    #[test]
+    fn one_ack_block_max_length() {
+        const test_cases: &[(QuicVersion, u8, &[u8])] = &[
+            (
+                QuicVersion::QUIC_VERSION_38,
+                0x4D,
+                &[
+                    // largest acked
+                    0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12,
+                    // Zero delta time.
+                    0x00, 0x00,
+                    // first ack block length.
+                    0x34, 0x12,
+                    // num timestamps.
+                    0x00,
+                ],
+            ),
+            (
+                QuicVersion::QUIC_VERSION_39,
+                0x4D,
+                &[
+                    // largest acked
+                    0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC,
+                    // Zero delta time.
+                    0x00, 0x00,
+                    // first ack block length.
+                    0x12, 0x34,
+                    // num timestamps.
+                    0x00,
+                ],
+            ),
+            (
+                QuicVersion::QUIC_VERSION_40,
+                0xAD,
+                &[
+                    // num timestamps.
+                    0x00,
+                    // largest acked
+                    0x00, 0x00, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC,
+                    // Zero delta time.
+                    0x00, 0x00,
+                    // first ack block length.
+                    0x12, 0x34,
+                ],
+            ),
+        ];
+
+        let creation_time = time::now().to_timespec();
+        let last_timestamp = QuicTimeDelta::zero();
+        let frame = QuicAckFrame {
+            largest_observed: kLargeLargestObserved,
+            ack_delay_time: QuicTimeDelta::zero(),
+            received_packet_times: None,
+            packets: PacketNumberQueue {
+                ranges: vec![
+                    (
+                        kLargeLargestObserved - kSmallLargestObserved + 1,
+                        kLargeLargestObserved + 1
+                    ),
+                ],
+            },
+        };
+
+        for &(quic_version, frame_type, packet) in test_cases {
+            assert_eq!(
+                QuicAckFrame::parse(
+                    quic_version,
+                    creation_time,
+                    last_timestamp,
+                    frame_type,
+                    packet
+                ).unwrap(),
+                frame,
+                "parse ACK frame with one ack block, version {:?}",
                 quic_version,
             );
         }
