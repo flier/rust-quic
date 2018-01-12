@@ -1,54 +1,9 @@
-#![allow(non_camel_case_types)]
-
 use failure::{Error, Fail};
 use nom::IResult;
 use num::FromPrimitive;
 
-use errors::QuicError;
+use errors::{QuicError, QuicRstStreamErrorCode};
 use types::{QuicStreamId, QuicStreamOffset, QuicVersion};
-
-#[repr(u32)]
-#[derive(Clone, Copy, Debug, FromPrimitive, PartialEq)]
-pub enum QuicRstStreamErrorCode {
-    /// Complete response has been sent, sending a RST to ask the other endpoint
-    /// to stop sending request data without discarding the response.
-    QUIC_STREAM_NO_ERROR = 0,
-
-    /// There was some error which halted stream processing.
-    QUIC_ERROR_PROCESSING_STREAM,
-    /// We got two fin or reset offsets which did not match.
-    QUIC_MULTIPLE_TERMINATION_OFFSETS,
-    /// We got bad payload and can not respond to it at the protocol level.
-    QUIC_BAD_APPLICATION_PAYLOAD,
-    /// Stream closed due to connection error. No reset frame is sent when this happens.
-    QUIC_STREAM_CONNECTION_ERROR,
-    /// GoAway frame sent. No more stream can be created.
-    QUIC_STREAM_PEER_GOING_AWAY,
-    /// The stream has been cancelled.
-    QUIC_STREAM_CANCELLED,
-    /// Closing stream locally, sending a RST to allow for proper flow control accounting.
-    /// Sent in response to a RST from the peer.
-    QUIC_RST_ACKNOWLEDGEMENT,
-    /// Receiver refused to create the stream (because its limit on open streams has been reached).
-    /// The sender should retry the request later (using another stream).
-    QUIC_REFUSED_STREAM,
-    /// Invalid URL in PUSH_PROMISE request header.
-    QUIC_INVALID_PROMISE_URL,
-    /// Server is not authoritative for this URL.
-    QUIC_UNAUTHORIZED_PROMISE_URL,
-    /// Can't have more than one active PUSH_PROMISE per URL.
-    QUIC_DUPLICATE_PROMISE_URL,
-    /// Vary check failed.
-    QUIC_PROMISE_VARY_MISMATCH,
-    /// Only GET and HEAD methods allowed.
-    QUIC_INVALID_PROMISE_METHOD,
-    /// The push stream is unclaimed and timed out.
-    QUIC_PUSH_STREAM_TIMED_OUT,
-    /// Received headers were too large.
-    QUIC_HEADERS_TOO_LARGE,
-    /// No error. Used as bound while iterating.
-    QUIC_STREAM_LAST_ERROR,
-}
 
 /// The `RST_STREAM` frame allows for abnormal termination of a stream.
 ///
@@ -64,7 +19,7 @@ pub struct QuicRstStreamFrame {
 
 impl QuicRstStreamFrame {
     pub fn parse(quic_version: QuicVersion, payload: &[u8]) -> Result<(QuicRstStreamFrame, &[u8]), Error> {
-        match parse_quic_reset_frame(payload, quic_version) {
+        match parse_quic_reset_stream_frame(payload, quic_version) {
             IResult::Done(remaining, frame) => Ok((frame, remaining)),
             IResult::Incomplete(needed) => {
                 bail!(QuicError::IncompletePacket(needed).context("incomplete reset frame."))
@@ -75,7 +30,7 @@ impl QuicRstStreamFrame {
 }
 
 named_args!(
-    parse_quic_reset_frame(quic_version: QuicVersion)<QuicRstStreamFrame>, do_parse!(
+    parse_quic_reset_stream_frame(quic_version: QuicVersion)<QuicRstStreamFrame>, do_parse!(
         stream_id: u32!(quic_version.endianness()) >>
         byte_offset_pre40: cond!(quic_version <= QuicVersion::QUIC_VERSION_39, u64!(quic_version.endianness())) >>
         error_code: map!(u32!(quic_version.endianness()), |code| {

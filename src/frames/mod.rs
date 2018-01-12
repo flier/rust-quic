@@ -18,10 +18,12 @@ mod stream;
 mod ack;
 mod padding;
 mod reset;
+mod conn_close;
 
 pub use self::ack::{PacketNumberQueue, QuicAckFrame};
+pub use self::conn_close::QuicConnectionCloseFrame;
 pub use self::padding::QuicPaddingFrame;
-pub use self::reset::{QuicRstStreamErrorCode, QuicRstStreamFrame};
+pub use self::reset::QuicRstStreamFrame;
 pub use self::stream::QuicStreamFrame;
 
 use types::QuicVersion;

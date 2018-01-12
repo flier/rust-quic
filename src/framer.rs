@@ -14,8 +14,8 @@ use constants::kMaxPacketSize;
 use crypto::{CryptoHandshakeMessage, NullDecrypter, QuicDecrypter, kCADR, kPRST, kRNON};
 use errors::QuicError;
 use errors::QuicError::*;
-use frames::{is_ack_frame, is_regular_frame, is_stream_frame, QuicAckFrame, QuicPaddingFrame, QuicRstStreamFrame,
-             QuicStreamFrame};
+use frames::{is_ack_frame, is_regular_frame, is_stream_frame, QuicAckFrame, QuicConnectionCloseFrame,
+             QuicPaddingFrame, QuicRstStreamFrame, QuicStreamFrame};
 use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketPublicHeader, QuicPublicResetPacket,
              QuicVersionNegotiationPacket};
 use types::{EncryptionLevel, Perspective, QuicFrameType, QuicPacketNumber, QuicTime, QuicTimeDelta, QuicVersion,
@@ -67,6 +67,9 @@ pub trait QuicFramerVisitor {
 
     /// Called when a RstStreamFrame has been parsed.
     fn on_reset_stream_frame(&self, frame: QuicRstStreamFrame) -> bool;
+
+    /// Called when a ConnectionCloseFrame has been parsed.
+    fn on_connection_close_frame(&self, frame: QuicConnectionCloseFrame) -> bool;
 
     /// Called when a packet has been completely processed.
     fn on_packet_complete(&self);
@@ -457,7 +460,17 @@ where
                                 return Ok(());
                             }
                         }
-                        QuicFrameType::ConnectionClose => {}
+                        QuicFrameType::ConnectionClose => {
+                            let (frame, remaining) = QuicConnectionCloseFrame::parse(self.quic_version, remaining)?;
+
+                            payload = remaining;
+
+                            if !self.visitor.on_connection_close_frame(frame) {
+                                debug!("Visitor asked to stop further processing.");
+
+                                return Ok(());
+                            }
+                        }
                         QuicFrameType::GoAway => {}
                         QuicFrameType::WindowUpdate => {}
                         QuicFrameType::Blocked => {}
