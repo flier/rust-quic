@@ -97,8 +97,8 @@ impl<'a> QuicStreamFrame<'a> {
                     remaining.into()
                 },
             }),
-            IResult::Incomplete(needed) => bail!(QuicError::IncompletePacket(needed).context("incomplete data frame.")),
-            IResult::Error(err) => bail!(QuicError::InvalidPacket(err).context("unable to process data frame.")),
+            IResult::Incomplete(needed) => bail!(QuicError::from(needed).context("incomplete data frame.")),
+            IResult::Error(err) => bail!(QuicError::from(err).context("unable to process data frame.")),
         }
     }
 }

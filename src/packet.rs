@@ -115,10 +115,8 @@ impl<'a> QuicPacketPublicHeader<'a> {
     {
         match public_header(buf, is_server) {
             IResult::Done(remaining, header) => Ok((remaining, header)),
-            IResult::Incomplete(needed) => {
-                bail!(QuicError::IncompletePacket(needed).context("incomplete public header."))
-            }
-            IResult::Error(err) => bail!(QuicError::InvalidPacket(err).context("unable to process public header.")),
+            IResult::Incomplete(needed) => bail!(QuicError::from(needed).context("incomplete public header.")),
+            IResult::Error(err) => bail!(QuicError::from(err).context("unable to process public header.")),
         }
     }
 
@@ -220,7 +218,7 @@ macro_rules! u48 (
 macro_rules! uint (
     ($input:expr, $endianness:expr, $nbytes:expr) => (
         if $nbytes < 1 || $nbytes > 8 {
-            ::nom::IResult::Error(::nom::ErrorKind::Tag)
+            ::nom::IResult::Error(nom::Err::Code(::nom::ErrorKind::Tag))
         } else if $input.len() < $nbytes {
             ::nom::IResult::Incomplete(::nom::Needed::Size($nbytes))
         } else {

@@ -13,13 +13,16 @@ byteorder = "1"
 bitflags = "1.0"
 extprim = "1.4"
 extprim_literals = "2.0"
-nom = "3.2"
 num = "0.1"
 num-derive= "0.1"
 time = "0.1"
 ring = { git = "https://github.com/flier/ring.git", branch = "with_auth_tag_len" }
 
 clippy = { version = "*", optional = true }
+
+[dependencies.nom]
+version = "3.2"
+features = ["verbose-errors"]
 
 [dev-dependencies]
 pretty_env_logger = "0.1"

@@ -388,7 +388,7 @@ mod tests {
                 ranges: vec![
                     (
                         kLargeLargestObserved - kSmallLargestObserved + 1,
-                        kLargeLargestObserved + 1
+                        kLargeLargestObserved + 1,
                     ),
                 ],
             },

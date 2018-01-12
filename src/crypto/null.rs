@@ -91,8 +91,8 @@ where
 
         let (plain_text, expect_hash) = match read_hash(cipher_text) {
             IResult::Done(remaining, hash) => (remaining, hash),
-            IResult::Incomplete(needed) => bail!(QuicError::IncompletePacket(needed).context("packet hash")),
-            IResult::Error(err) => bail!(QuicError::InvalidPacket(err).context("unable to process crypted packet.")),
+            IResult::Incomplete(needed) => bail!(QuicError::from(needed).context("packet hash")),
+            IResult::Error(err) => bail!(QuicError::from(err).context("unable to process crypted packet.")),
         };
 
         let correct_hash = compute_hash::<P>(version, associated_data, plain_text);

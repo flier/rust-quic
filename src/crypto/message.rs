@@ -62,9 +62,9 @@ impl<'a> CryptoHandshakeMessage<'a> {
                 ))
             }
             IResult::Incomplete(needed) => {
-                bail!(QuicError::IncompletePacket(needed).context("incomplete crypto handshake message."))
+                bail!(QuicError::from(needed).context("incomplete crypto handshake message."))
             }
-            IResult::Error(err) => bail!(QuicError::InvalidPacket(err).context("unable to crypto handshake message.")),
+            IResult::Error(err) => bail!(QuicError::from(err).context("unable to crypto handshake message.")),
         }
     }
 

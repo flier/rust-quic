@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use extprim::u128::u128;
-use nom::{self, IError};
+use nom;
 use num::FromPrimitive;
 
 use types::QuicTag;
@@ -10,7 +10,7 @@ use types::QuicTag;
 pub enum QuicError {
     #[fail(display = "incomlete packet")] IncompletePacket(nom::Needed),
 
-    #[fail(display = "invalid packet, {}", _0)] InvalidPacket(#[cause] nom::Err),
+    #[fail(display = "invalid packet, {:?}", _0)] InvalidPacket(nom::ErrorKind),
 
     #[fail(display = "invalid packet header, {}", _0)] InvalidPacketHeader(String),
 
@@ -39,12 +39,18 @@ pub enum QuicError {
     #[fail(display = "underflow with ack block length")] AckBlockOverflow,
 }
 
-impl From<IError> for QuicError {
-    fn from(error: IError) -> QuicError {
-        match error {
-            IError::Error(err) => QuicError::InvalidPacket(err),
-            IError::Incomplete(needed) => QuicError::IncompletePacket(needed),
+impl<I> From<nom::IError<I>> for QuicError {
+    fn from(err: nom::IError<I>) -> Self {
+        match err {
+            nom::IError::Error(err) => QuicError::from(err.into_error_kind()),
+            nom::IError::Incomplete(needed) => QuicError::from(needed),
         }
+    }
+}
+
+impl<P> From<nom::Err<P>> for QuicError {
+    fn from(err: nom::Err<P>) -> Self {
+        QuicError::InvalidPacket(err.into_error_kind())
     }
 }
 
