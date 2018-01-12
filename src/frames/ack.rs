@@ -2,7 +2,7 @@ use failure::{Error, Fail};
 use nom::{self, IResult, be_u8};
 use time::Duration;
 
-use errors::ParseError::AckBlockOverflow;
+use errors::ParseError::*;
 use errors::QuicError::{self, IncompletePacket};
 use packet::{read_ack_packet_number_length, QuicPacketNumberLength};
 use types::{QuicPacketNumber, QuicTime, QuicTimeDelta, QuicVersion, ToQuicTimeDelta, UFloat16, ufloat16};
@@ -98,7 +98,7 @@ named_args!(parse_quic_ack_frame(quic_version: QuicVersion,
         ack_delay_time_us: map!(u16!(quic_version.endianness()), UFloat16::from) >>
         num_ack_blocks_pre40: cond!(quic_version <= QuicVersion::QUIC_VERSION_39 && has_ack_blocks, be_u8) >>
         first_block_length: add_return_error!(
-            nom::ErrorKind::Custom(AckBlockOverflow as u32),
+            nom::ErrorKind::Custom(FirstAckBlockLengthOverflow as u32),
             verify!(
                 uint!(quic_version.endianness(), ack_block_length as usize),
                 |first_block_length| first_block_length < largest_observed + 1
@@ -110,13 +110,13 @@ named_args!(parse_quic_ack_frame(quic_version: QuicVersion,
             tuple!(map!(be_u8, u64::from), uint!(quic_version.endianness(), ack_block_length as usize))
         ) >>
         _packet_ranges_overflow: add_return_error!(
-            nom::ErrorKind::Custom(AckBlockOverflow as u32),
+            nom::ErrorKind::Custom(AckBlockLengthOverflow as u32),
             verify!(value!(&packet_ranges),
                 |ranges: &[(u64, u64)]| {
                     ranges
                         .iter()
                         .fold(0, |acc, &(gap, current_block_length)| acc + gap + current_block_length)
-                    < first_received
+                    <= first_received
                 }
             )
         ) >>
@@ -143,18 +143,21 @@ named_args!(parse_quic_ack_frame(quic_version: QuicVersion,
                     Duration::microseconds(ack_delay_time_us.into())
                 },
                 received_packet_times: timestamps.map(|(delta_from_largest_observed, time_delta_us, timestamps)| {
+                    let last_timestamp = QuicTimeDelta::from_wire(last_timestamp, time_delta_us);
+
                     timestamps.into_iter().fold(
                         (
                             vec![(largest_observed - delta_from_largest_observed, creation_time + last_timestamp)],
-                            QuicTimeDelta::from_wire(last_timestamp, time_delta_us),
+                            last_timestamp,
                         ),
                         |(mut times, last_timestamp), (delta_from_largest_observed, incremental_time_delta_us)| {
                             let seq_num = largest_observed - u64::from(delta_from_largest_observed);
-                            let timestamp = last_timestamp + Duration::microseconds(incremental_time_delta_us.into());
+                            let last_timestamp = last_timestamp
+                                + Duration::microseconds(i64::from(incremental_time_delta_us));
 
-                            times.push((seq_num, creation_time + timestamp));
+                            times.push((seq_num, creation_time + last_timestamp));
 
-                            (times, timestamp)
+                            (times, last_timestamp)
                         }
                     ).0
                 }),
@@ -198,6 +201,7 @@ mod tests {
 
     #[test]
     fn one_ack_block() {
+        #[cfg_attr(rustfmt, rustfmt_skip)]
         const test_cases: &[(QuicVersion, u8, &[u8])] = &[
             (
                 QuicVersion::QUIC_VERSION_38,
@@ -272,6 +276,7 @@ mod tests {
 
     #[test]
     fn overflow() {
+        #[cfg_attr(rustfmt, rustfmt_skip)]
         const test_cases: &[(QuicVersion, u8, &[u8])] = &[
             (
                 QuicVersion::QUIC_VERSION_38,
@@ -337,6 +342,7 @@ mod tests {
 
     #[test]
     fn one_ack_block_max_length() {
+        #[cfg_attr(rustfmt, rustfmt_skip)]
         const test_cases: &[(QuicVersion, u8, &[u8])] = &[
             (
                 QuicVersion::QUIC_VERSION_38,
@@ -394,6 +400,174 @@ mod tests {
                         kLargeLargestObserved - kSmallLargestObserved + 1,
                         kLargeLargestObserved + 1,
                     ),
+                ],
+            },
+        };
+
+        for &(quic_version, frame_type, packet) in test_cases {
+            assert_eq!(
+                QuicAckFrame::parse(
+                    quic_version,
+                    creation_time,
+                    last_timestamp,
+                    frame_type,
+                    packet
+                ).unwrap(),
+                frame,
+                "parse ACK frame with one ack block, version {:?}",
+                quic_version,
+            );
+        }
+    }
+
+    #[test]
+    fn two_timestamps_with_multiple_ack_blocks() {
+        #[cfg_attr(rustfmt, rustfmt_skip)]
+        const test_cases: &[(QuicVersion, u8, &[u8])] = &[
+            (
+                QuicVersion::QUIC_VERSION_38,
+                0x65,
+                &[
+                    // largest acked
+                    0x34, 0x12,
+                    // Zero delta time.
+                    0x00, 0x00,
+                    // num ack blocks ranges.
+                    0x04,
+                    // first ack block length.
+                    0x01, 0x00,
+                    // gap to next block.
+                    0x01,
+                    // ack block length.
+                    0xaf, 0x0e,
+                    // gap to next block.
+                    0xff,
+                    // ack block length.
+                    0x00, 0x00,
+                    // gap to next block.
+                    0x91,
+                    // ack block length.
+                    0xea, 0x01,
+                    // gap to next block.
+                    0x05,
+                    // ack block length.
+                    0x04, 0x00,
+                    // Number of timestamps.
+                    0x02,
+                    // Delta from largest observed.
+                    0x01,
+                    // Delta time.
+                    0x10, 0x32, 0x54, 0x76,
+                    // Delta from largest observed.
+                    0x02,
+                    // Delta time.
+                    0x10, 0x32,
+                ],
+            ),
+            (
+                QuicVersion::QUIC_VERSION_39,
+                0x65,
+                &[
+                    // largest acked
+                    0x12, 0x34,
+                    // Zero delta time.
+                    0x00, 0x00,
+                    // num ack blocks ranges.
+                    0x04,
+                    // first ack block length.
+                    0x00, 0x01,
+                    // gap to next block.
+                    0x01,
+                    // ack block length.
+                    0x0e, 0xaf,
+                    // gap to next block.
+                    0xff,
+                    // ack block length.
+                    0x00, 0x00,
+                    // gap to next block.
+                    0x91,
+                    // ack block length.
+                    0x01, 0xea,
+                    // gap to next block.
+                    0x05,
+                    // ack block length.
+                    0x00, 0x04,
+                    // Number of timestamps.
+                    0x02,
+                    // Delta from largest observed.
+                    0x01,
+                    // Delta time.
+                    0x76, 0x54, 0x32, 0x10,
+                    // Delta from largest observed.
+                    0x02 ,
+                    // Delta time.
+                    0x32, 0x10
+                ],
+            ),
+            (
+                QuicVersion::QUIC_VERSION_40,
+                0xB5,
+                &[
+                    // num ack blocks ranges.
+                    0x04,
+                    // Number of timestamps.
+                    0x02,
+                    // largest acked
+                    0x12, 0x34,
+                    // Zero delta time.
+                    0x00, 0x00,
+                    // first ack block length.
+                    0x00, 0x01,
+                    // gap to next block.
+                    0x01,
+                    // ack block length.
+                    0x0e, 0xaf,
+                    // gap to next block.
+                    0xff,
+                    // ack block length.
+                    0x00, 0x00,
+                    // gap to next block.
+                    0x91,
+                    // ack block length.
+                    0x01, 0xea,
+                    // gap to next block.
+                    0x05,
+                    // ack block length.
+                    0x00, 0x04,
+                    // Delta from largest observed.
+                    0x01,
+                    // Delta time.
+                    0x76, 0x54, 0x32, 0x10,
+                    // Delta from largest observed.
+                    0x02 ,
+                    // Delta time.
+                    0x32, 0x10
+                ],
+            ),
+        ];
+
+        let creation_time = time::now().to_timespec();
+        let last_timestamp = QuicTimeDelta::zero();
+        let frame = QuicAckFrame {
+            largest_observed: kSmallLargestObserved,
+            ack_delay_time: QuicTimeDelta::zero(),
+            received_packet_times: Some(vec![
+                (
+                    kSmallLargestObserved - 1,
+                    creation_time + Duration::microseconds(0x76543210),
+                ),
+                (
+                    kSmallLargestObserved - 2,
+                    creation_time + Duration::microseconds(0x76543210)
+                        + Duration::microseconds(i64::from(UFloat16::from(0x3210))),
+                ),
+            ]),
+            packets: PacketNumberQueue {
+                ranges: vec![
+                    (kSmallLargestObserved, kSmallLargestObserved + 1),
+                    (900, kSmallLargestObserved - 1),
+                    (10, 500),
+                    (1, 5),
                 ],
             },
         };

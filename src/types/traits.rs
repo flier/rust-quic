@@ -80,28 +80,28 @@ impl ToQuicTimeDelta for QuicTimeDelta {
         //
         // epoch_delta is the delta between epochs. A delta is 4 bytes of
         // microseconds.
-        let epoch_delta = 1 << 32;
-        let time_delta_us = i64::from(time_delta_us);
+        let epoch_delta = 1u64 << 32;
+        let time_delta_us = u64::from(time_delta_us);
 
         Duration::microseconds(
-            if let Some(last_timestamp) = last_timestamp.num_microseconds() {
-                let epoch = last_timestamp & !(epoch_delta - 1);
+            if let Some(last_timestamp_us) = last_timestamp.num_microseconds() {
+                let epoch: u64 = (last_timestamp_us as u64) & !(epoch_delta - 1);
                 // Wrapping is safe here because a wrapped value will not be ClosestTo below.
-                let prev_epoch = epoch.wrapping_sub(epoch_delta);
-                let next_epoch = epoch.wrapping_add(epoch_delta);
+                let prev_epoch: u64 = epoch.wrapping_sub(epoch_delta);
+                let next_epoch: u64 = epoch.wrapping_add(epoch_delta);
 
                 closest_to(
-                    last_timestamp,
+                    last_timestamp_us as u64,
                     epoch + time_delta_us,
                     closest_to(
-                        last_timestamp,
+                        last_timestamp_us as u64,
                         prev_epoch + time_delta_us,
                         next_epoch + time_delta_us,
                     ),
                 )
             } else {
                 time_delta_us
-            },
+            } as i64,
         )
     }
 }

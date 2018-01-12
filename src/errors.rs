@@ -36,7 +36,9 @@ pub enum QuicError {
 
     #[fail(display = "offset {} out of order", _0)] OffsetOutOfOrder(usize),
 
-    #[fail(display = "underflow with ack block length")] AckBlockOverflow,
+    #[fail(display = "underflow with first ack block length")] FirstAckBlockLengthOverflow,
+
+    #[fail(display = "underflow with ack block length")] AckBlockLengthOverflow,
 }
 
 impl<I> From<nom::IError<I>> for QuicError {
@@ -64,7 +66,8 @@ impl From<nom::ErrorKind> for QuicError {
     fn from(err: nom::ErrorKind) -> Self {
         match err {
             nom::ErrorKind::Custom(code) => match ParseError::from_u32(code) {
-                Some(ParseError::AckBlockOverflow) => QuicError::AckBlockOverflow,
+                Some(ParseError::FirstAckBlockLengthOverflow) => QuicError::FirstAckBlockLengthOverflow,
+                Some(ParseError::AckBlockLengthOverflow) => QuicError::AckBlockLengthOverflow,
                 None => QuicError::InvalidPacket(err),
             },
             _ => QuicError::InvalidPacket(err),
@@ -75,5 +78,6 @@ impl From<nom::ErrorKind> for QuicError {
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, FromPrimitive, PartialEq)]
 pub enum ParseError {
-    AckBlockOverflow,
+    FirstAckBlockLengthOverflow,
+    AckBlockLengthOverflow,
 }

@@ -322,9 +322,7 @@ where
         )?;
 
         if packet_number == 0 {
-            bail!(InvalidPacketHeader(
-                "packet numbers cannot be 0".to_owned()
-            ));
+            bail!(InvalidPacketHeader("packet numbers cannot be 0".to_owned()));
         }
 
         Ok((
