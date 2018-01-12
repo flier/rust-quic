@@ -16,6 +16,13 @@ const kLargestAckedOffset: usize = 2;
 const kQuicHasMultipleAckBlocksOffset_Pre40: usize = 5;
 const kQuicHasMultipleAckBlocksOffset: usize = 4;
 
+/// The ACK frame is sent to inform the peer which packets have been received,
+/// as well as which packets are still considered missing by the receiver
+/// (the contents of missing packets may need to be resent).
+/// The ack frame contains between 1 and 256 ack blocks.
+/// Ack blocks are ranges of acknowledged packets,
+/// similar to TCP’s SACK blocks, but QUIC has no equivalent of TCP’s cumulative ack point,
+/// because packets are retransmitted with new sequence numbers.
 #[derive(Clone, Debug, PartialEq)]
 pub struct QuicAckFrame {
     /// The highest packet number we've observed from the peer.

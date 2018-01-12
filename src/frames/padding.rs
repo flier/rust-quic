@@ -2,7 +2,11 @@ use failure::Error;
 
 use types::QuicVersion;
 
-/// A padding frame contains no payload.
+/// The `PADDING` frame pads a packet with 0x00 bytes.
+///
+/// When this frame is encountered, the rest of the packet is expected to be padding bytes.
+/// The frame contains 0x00 bytes and extends to the end of the QUIC packet.
+/// A `PADDING` frame only has a Frame Type field, and must have the 8-bit Frame Type field set to 0x00.
 #[derive(Clone, Debug, PartialEq)]
 pub struct QuicPaddingFrame {
     /// -1: full padding to the end of a max-sized packet

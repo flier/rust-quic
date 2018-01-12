@@ -31,6 +31,7 @@ const kQuicStreamDataLengthShift: usize = 0;
 const kQuicStreamFinShift_Pre40: usize = 6;
 const kQuicStreamFinShift: usize = 5;
 
+/// The STREAM frame is used to both implicitly create a stream and to send data on it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct QuicStreamFrame<'a> {
     pub stream_id: QuicStreamId,

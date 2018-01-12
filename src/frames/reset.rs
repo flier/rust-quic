@@ -50,6 +50,11 @@ pub enum QuicRstStreamErrorCode {
     QUIC_STREAM_LAST_ERROR,
 }
 
+/// The `RST_STREAM` frame allows for abnormal termination of a stream.
+///
+/// When sent by the creator of a stream, it indicates the creator wishes to cancel the stream.
+/// When sent by the receiver of a stream, it indicates an error
+/// or that the receiver did not want to accept the stream, so the stream should be closed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct QuicRstStreamFrame {
     pub stream_id: QuicStreamId,
