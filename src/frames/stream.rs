@@ -135,52 +135,64 @@ mod tests {
 
     #[test]
     fn parse_frame() {
-        const packet: &[u8] = &[
-            // stream id
-            0x04, 0x03, 0x02, 0x01,
-            // offset
-            0x54, 0x76, 0x10, 0x32,
-            0xDC, 0xFE, 0x98, 0xBA,
-            // data length
-            0x0c, 0x00,
-            // data
-            b'h',  b'e',  b'l',  b'l',
-            b'o',  b' ',  b'w',  b'o',
-            b'r',  b'l',  b'd',  b'!',
-            // paddings
-            0x00, 0x00,
-        ];
-
-        const packet39: &[u8] = &[
-            // stream id
-            0x01, 0x02, 0x03, 0x04,
-            // offset
-            0xBA, 0x98, 0xFE, 0xDC,
-            0x32, 0x10, 0x76, 0x54,
-            // data length
-            0x00, 0x0c,
-            // data
-            b'h',  b'e',  b'l',  b'l',
-            b'o',  b' ',  b'w',  b'o',
-            b'r',  b'l',  b'd',  b'!',
-            // paddings
-            0x00, 0x00,
-        ];
-
-        const packet40: &[u8] = &[
-            // data length
-            0x00, 0x0c,
-            // stream id
-            0x01, 0x02, 0x03, 0x04,
-            // offset
-            0xBA, 0x98, 0xFE, 0xDC,
-            0x32, 0x10, 0x76, 0x54,
-            // data
-            b'h',  b'e',  b'l',  b'l',
-            b'o',  b' ',  b'w',  b'o',
-            b'r',  b'l',  b'd',  b'!',
-            // paddings
-            0x00, 0x00,
+        const test_cases: &[(QuicVersion, u8, &[u8])] = &[
+            (
+                QuicVersion::QUIC_VERSION_38,
+                0xFF,
+                &[
+                    // stream id
+                    0x04, 0x03, 0x02, 0x01,
+                    // offset
+                    0x54, 0x76, 0x10, 0x32,
+                    0xDC, 0xFE, 0x98, 0xBA,
+                    // data length
+                    0x0c, 0x00,
+                    // data
+                    b'h',  b'e',  b'l',  b'l',
+                    b'o',  b' ',  b'w',  b'o',
+                    b'r',  b'l',  b'd',  b'!',
+                    // paddings
+                    0x00, 0x00,
+                ],
+            ),
+            (
+                QuicVersion::QUIC_VERSION_39,
+                0xFF,
+                &[
+                    // stream id
+                    0x01, 0x02, 0x03, 0x04,
+                    // offset
+                    0xBA, 0x98, 0xFE, 0xDC,
+                    0x32, 0x10, 0x76, 0x54,
+                    // data length
+                    0x00, 0x0c,
+                    // data
+                    b'h',  b'e',  b'l',  b'l',
+                    b'o',  b' ',  b'w',  b'o',
+                    b'r',  b'l',  b'd',  b'!',
+                    // paddings
+                    0x00, 0x00,
+                ],
+            ),
+            (
+                QuicVersion::QUIC_VERSION_40,
+                0xFF,
+                &[
+                    // data length
+                    0x00, 0x0c,
+                    // stream id
+                    0x01, 0x02, 0x03, 0x04,
+                    // offset
+                    0xBA, 0x98, 0xFE, 0xDC,
+                    0x32, 0x10, 0x76, 0x54,
+                    // data
+                    b'h',  b'e',  b'l',  b'l',
+                    b'o',  b' ',  b'w',  b'o',
+                    b'r',  b'l',  b'd',  b'!',
+                    // paddings
+                    0x00, 0x00,
+                ],
+            ),
         ];
 
         let stream_frame = QuicStreamFrame {
@@ -190,17 +202,13 @@ mod tests {
             data: Cow::from(&b"hello world!"[..]),
         };
 
-        assert_eq!(
-            QuicStreamFrame::parse(QuicVersion::QUIC_VERSION_38, 0xFF, packet).unwrap(),
-            stream_frame
-        );
-        assert_eq!(
-            QuicStreamFrame::parse(QuicVersion::QUIC_VERSION_39, 0xFF, packet39).unwrap(),
-            stream_frame
-        );
-        assert_eq!(
-            QuicStreamFrame::parse(QuicVersion::QUIC_VERSION_40, 0xFF, packet40).unwrap(),
-            stream_frame
-        );
+        for &(quic_version, frame_type, packet) in test_cases {
+            assert_eq!(
+                QuicStreamFrame::parse(quic_version, frame_type, packet).unwrap(),
+                stream_frame,
+                "parse stream frame, version {:?}",
+                quic_version,
+            );
+        }
     }
 }
