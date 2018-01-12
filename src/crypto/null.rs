@@ -10,6 +10,7 @@ use nom::{IResult, le_u32, le_u64};
 use crypto::{QuicDecrypter, QuicEncrypter};
 use crypto::fnv::{fnv1a, kOffset};
 use errors::QuicError;
+use errors::QuicError::*;
 use types::{Perspective, QuicDiversificationNonce, QuicPacketNumber, QuicVersion};
 
 const kHashSizeShort: usize = 12; // size of uint128 serialized short
@@ -91,14 +92,14 @@ where
 
         let (plain_text, expect_hash) = match read_hash(cipher_text) {
             IResult::Done(remaining, hash) => (remaining, hash),
-            IResult::Incomplete(needed) => bail!(QuicError::from(needed).context("packet hash")),
+            IResult::Incomplete(needed) => bail!(IncompletePacket(needed).context("packet hash")),
             IResult::Error(err) => bail!(QuicError::from(err).context("unable to process crypted packet.")),
         };
 
         let correct_hash = compute_hash::<P>(version, associated_data, plain_text);
 
         if expect_hash != correct_hash {
-            bail!(QuicError::PacketHashMismatch(correct_hash));
+            bail!(PacketHashMismatch(correct_hash));
         }
 
         Ok(plain_text.into())

@@ -12,6 +12,7 @@ use nom::{IResult, le_u16};
 use constants::kMaxPacketSize;
 use crypto::{CryptoHandshakeMessage, NullDecrypter, QuicDecrypter, kCADR, kPRST, kRNON};
 use errors::QuicError;
+use errors::QuicError::*;
 use frames::{is_ack_frame, is_stream_frame, QuicAckFrame, QuicStreamFrame, kQuicFrameTypeSpecialMask};
 use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketPublicHeader, QuicPublicResetPacket,
              QuicVersionNegotiationPacket};
@@ -181,7 +182,7 @@ where
         let (payload, public_header) = QuicPacketPublicHeader::parse::<E>(packet, P::is_server())?;
 
         if public_header.reset_flag && public_header.versions.is_some() {
-            bail!(QuicError::InvalidPacketHeader(
+            bail!(InvalidPacketHeader(
                 "got version flag in reset packet".to_owned()
             ));
         }
@@ -239,7 +240,7 @@ where
         );
 
         if message.tag() != kPRST {
-            bail!(QuicError::InvalidResetPacket(format!(
+            bail!(InvalidResetPacket(format!(
                 "incorrect message tag: {}",
                 message.tag()
             )));
@@ -293,7 +294,7 @@ where
         }
 
         if packet.len() > kMaxPacketSize {
-            bail!(QuicError::PacketTooLarge(packet.len()));
+            bail!(PacketTooLarge(packet.len()));
         }
 
         // Handle the payload.
@@ -321,7 +322,7 @@ where
         )?;
 
         if packet_number == 0 {
-            bail!(QuicError::InvalidPacketHeader(
+            bail!(InvalidPacketHeader(
                 "packet numbers cannot be 0".to_owned()
             ));
         }
@@ -426,7 +427,7 @@ where
             let frame_type = *frame_type;
 
             if (frame_type & kQuicFrameTypeSpecialMask) == 0 {
-                bail!(QuicError::InvalidFrameType(frame_type));
+                bail!(InvalidFrameType(frame_type));
             }
 
             if is_stream_frame(self.quic_version, frame_type) {

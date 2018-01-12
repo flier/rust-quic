@@ -10,7 +10,7 @@ use failure::{Error, Fail};
 use nom::{IResult, Needed, be_u64, be_u8};
 
 use constants::{kPublicFlagsSize, kQuicVersionSize};
-use errors::QuicError;
+use errors::QuicError::{self, IncompletePacket};
 use types::{QuicConnectionId, QuicDiversificationNonce, QuicPacketNumber, QuicPublicResetNonceProof, ToEndianness};
 use types::QuicVersion;
 
@@ -115,7 +115,7 @@ impl<'a> QuicPacketPublicHeader<'a> {
     {
         match public_header(buf, is_server) {
             IResult::Done(remaining, header) => Ok((remaining, header)),
-            IResult::Incomplete(needed) => bail!(QuicError::from(needed).context("incomplete public header.")),
+            IResult::Incomplete(needed) => bail!(IncompletePacket(needed).context("incomplete public header.")),
             IResult::Error(err) => bail!(QuicError::from(err).context("unable to process public header.")),
         }
     }

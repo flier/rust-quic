@@ -6,7 +6,7 @@ use byteorder::{NativeEndian, NetworkEndian};
 use failure::Error;
 use nom::Endianness;
 
-use errors::QuicError;
+use errors::QuicError::UnsupportedVersion;
 use types::{QuicTag, ToEndianness};
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
@@ -63,7 +63,7 @@ impl FromStr for QuicVersion {
             "Q039" => Ok(QuicVersion::QUIC_VERSION_39),
             "Q040" => Ok(QuicVersion::QUIC_VERSION_40),
             "Q041" => Ok(QuicVersion::QUIC_VERSION_41),
-            _ => bail!(QuicError::UnsupportedVersion(QuicTag::new(s.as_bytes()))),
+            _ => bail!(UnsupportedVersion(QuicTag::new(s.as_bytes()))),
         }
     }
 }

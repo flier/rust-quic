@@ -5,7 +5,7 @@ use std::borrow::Cow;
 use failure::{Error, Fail};
 use nom::{self, IResult};
 
-use errors::QuicError;
+use errors::QuicError::{self, IncompletePacket};
 use frames::{kQuicFrameTypeStreamMask, kQuicFrameTypeStreamMask_Pre40};
 use types::{QuicStreamId, QuicStreamOffset, QuicVersion};
 
@@ -87,7 +87,7 @@ impl<'a> QuicStreamFrame<'a> {
                 fin,
                 data: if let Some(len) = data_len {
                     if len > remaining.len() {
-                        bail!(QuicError::IncompletePacket(nom::Needed::Size(len)).context("incomplete data frame."))
+                        bail!(IncompletePacket(nom::Needed::Size(len)).context("incomplete data frame."))
                     } else {
                         let data = &remaining[..len];
 
@@ -97,7 +97,7 @@ impl<'a> QuicStreamFrame<'a> {
                     remaining.into()
                 },
             }),
-            IResult::Incomplete(needed) => bail!(QuicError::from(needed).context("incomplete data frame.")),
+            IResult::Incomplete(needed) => bail!(IncompletePacket(needed).context("incomplete data frame.")),
             IResult::Error(err) => bail!(QuicError::from(err).context("unable to process data frame.")),
         }
     }

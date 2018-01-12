@@ -2,7 +2,8 @@ use failure::{Error, Fail};
 use nom::{self, IResult, be_u8};
 use time::Duration;
 
-use errors::{ParseError, QuicError};
+use errors::ParseError::AckBlockOverflow;
+use errors::QuicError::{self, IncompletePacket};
 use packet::{read_ack_packet_number_length, QuicPacketNumberLength};
 use types::{QuicPacketNumber, QuicTime, QuicTimeDelta, QuicVersion, ToQuicTimeDelta, UFloat16, ufloat16};
 
@@ -78,7 +79,7 @@ impl QuicAckFrame {
 
                 Ok(frame)
             }
-            IResult::Incomplete(needed) => bail!(QuicError::from(needed).context("incomplete ack frame.")),
+            IResult::Incomplete(needed) => bail!(IncompletePacket(needed).context("incomplete ack frame.")),
             IResult::Error(err) => bail!(QuicError::from(err).context("unable to process ack frame.")),
         }
     }
@@ -96,9 +97,12 @@ named_args!(parse_quic_ack_frame(quic_version: QuicVersion,
         largest_observed: uint!(quic_version.endianness(), largest_acked_length as usize) >>
         ack_delay_time_us: map!(u16!(quic_version.endianness()), UFloat16::from) >>
         num_ack_blocks_pre40: cond!(quic_version <= QuicVersion::QUIC_VERSION_39 && has_ack_blocks, be_u8) >>
-        first_block_length: verify!(
-            uint!(quic_version.endianness(), ack_block_length as usize),
-            |first_block_length| first_block_length < largest_observed + 1
+        first_block_length: add_return_error!(
+            nom::ErrorKind::Custom(AckBlockOverflow as u32),
+            verify!(
+                uint!(quic_version.endianness(), ack_block_length as usize),
+                |first_block_length| first_block_length < largest_observed + 1
+            )
         ) >>
         first_received: value!(largest_observed + 1 - first_block_length) >>
         num_ack_blocks: map!(value!(num_ack_blocks_new.or(num_ack_blocks_pre40)), |n| n.unwrap_or(0)) >>
@@ -106,7 +110,7 @@ named_args!(parse_quic_ack_frame(quic_version: QuicVersion,
             tuple!(map!(be_u8, u64::from), uint!(quic_version.endianness(), ack_block_length as usize))
         ) >>
         _packet_ranges_overflow: add_return_error!(
-            nom::ErrorKind::Custom(ParseError::AckBlockOverflow as u32),
+            nom::ErrorKind::Custom(AckBlockOverflow as u32),
             verify!(value!(&packet_ranges),
                 |ranges: &[(u64, u64)]| {
                     ranges

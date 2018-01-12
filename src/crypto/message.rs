@@ -8,6 +8,7 @@ use failure::{Error, Fail};
 use nom::{IResult, Needed, le_u16, le_u32};
 
 use errors::QuicError;
+use errors::QuicError::*;
 use types::{quic_tag, QuicTag};
 
 /// Max number of entries in a message.
@@ -32,22 +33,22 @@ impl<'a> CryptoHandshakeMessage<'a> {
                 for (tag, offset) in entries {
                     match last_tag {
                         Some(last_tag) if tag == last_tag => {
-                            bail!(QuicError::DuplicateTag(tag));
+                            bail!(DuplicateTag(tag));
                         }
                         Some(last_tag) if tag < last_tag => {
-                            bail!(QuicError::TagOutOfOrder(tag));
+                            bail!(TagOutOfOrder(tag));
                         }
                         _ => {}
                     }
 
                     if offset < last_offset {
-                        bail!(QuicError::OffsetOutOfOrder(offset));
+                        bail!(OffsetOutOfOrder(offset));
                     }
 
                     let size = offset - last_offset;
 
                     if size > remaining.len() {
-                        bail!(QuicError::IncompletePacket(Needed::Size(offset)).context("handshake message payload."));
+                        bail!(IncompletePacket(Needed::Size(offset)).context("handshake message payload."));
                     }
 
                     values.insert(tag, &remaining[last_offset..offset]);
@@ -62,7 +63,7 @@ impl<'a> CryptoHandshakeMessage<'a> {
                 ))
             }
             IResult::Incomplete(needed) => {
-                bail!(QuicError::from(needed).context("incomplete crypto handshake message."))
+                bail!(IncompletePacket(needed).context("incomplete crypto handshake message."))
             }
             IResult::Error(err) => bail!(QuicError::from(err).context("unable to crypto handshake message.")),
         }
@@ -102,10 +103,10 @@ impl<'a> CryptoHandshakeMessage<'a> {
             if value.len() == mem::size_of::<T>() {
                 Ok(read(value))
             } else {
-                bail!(QuicError::InvalidParam(tag))
+                bail!(InvalidParam(tag))
             }
         } else {
-            bail!(QuicError::ParamNotFound(tag))
+            bail!(ParamNotFound(tag))
         }
     }
 }
