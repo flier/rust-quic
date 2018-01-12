@@ -6,18 +6,19 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 use byteorder::{ByteOrder, NativeEndian, NetworkEndian};
 use bytes::Bytes;
-use failure::{Error, ResultExt};
+use failure::{Error, Fail, ResultExt};
 use nom::{IResult, le_u16};
+use num::FromPrimitive;
 
 use constants::kMaxPacketSize;
 use crypto::{CryptoHandshakeMessage, NullDecrypter, QuicDecrypter, kCADR, kPRST, kRNON};
 use errors::QuicError;
 use errors::QuicError::*;
-use frames::{is_ack_frame, is_stream_frame, QuicAckFrame, QuicStreamFrame, kQuicFrameTypeSpecialMask};
+use frames::{is_ack_frame, is_regular_frame, is_stream_frame, QuicAckFrame, QuicPaddingFrame, QuicStreamFrame};
 use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketPublicHeader, QuicPublicResetPacket,
              QuicVersionNegotiationPacket};
-use types::{EncryptionLevel, Perspective, QuicPacketNumber, QuicTime, QuicTimeDelta, QuicVersion, ToEndianness,
-            ToQuicPacketNumber};
+use types::{EncryptionLevel, Perspective, QuicFrameType, QuicPacketNumber, QuicTime, QuicTimeDelta, QuicVersion,
+            ToEndianness, ToQuicPacketNumber};
 
 pub trait QuicFramerVisitor {
     /// Called when a new packet has been received, before it has been validated or processed.
@@ -59,6 +60,9 @@ pub trait QuicFramerVisitor {
     ///
     /// If `on_ack_frame` returns false, the framer will stop parsing the current packet.
     fn on_ack_frame(&self, frame: QuicAckFrame) -> bool;
+
+    /// Called when a QuicPaddingFrame has been parsed.
+    fn on_padding_frame(&self, frame: QuicPaddingFrame) -> bool;
 
     /// Called when a packet has been completely processed.
     fn on_packet_complete(&self);
@@ -420,42 +424,64 @@ where
         self.largest_packet_number = cmp::max(self.largest_packet_number, header.packet_number);
     }
 
-    fn process_frame_data(&self, payload: &[u8], _header: &QuicPacketHeader) -> Result<(), Error> {
-        while let Some((frame_type, payload)) = payload.split_first() {
+    fn process_frame_data(&self, mut payload: &[u8], _header: &QuicPacketHeader) -> Result<(), Error> {
+        while let Some((frame_type, remaining)) = payload.split_first() {
             let frame_type = *frame_type;
 
-            if (frame_type & kQuicFrameTypeSpecialMask) == 0 {
-                bail!(InvalidFrameType(frame_type));
-            }
+            if is_regular_frame(frame_type) {
+                if let Some(regular_frame_type) = QuicFrameType::from_u8(frame_type) {
+                    match regular_frame_type {
+                        QuicFrameType::Padding => {
+                            let (frame, remaining) = QuicPaddingFrame::parse(self.quic_version, remaining)?;
 
-            if is_stream_frame(self.quic_version, frame_type) {
-                let frame = QuicStreamFrame::parse(self.quic_version, frame_type, payload)?;
+                            payload = remaining;
+
+                            if !self.visitor.on_padding_frame(frame) {
+                                debug!("Visitor asked to stop further processing.");
+
+                                return Ok(());
+                            }
+                        }
+                        QuicFrameType::ResetStream => {}
+                        QuicFrameType::ConnectionClose => {}
+                        QuicFrameType::GoAway => {}
+                        QuicFrameType::WindowUpdate => {}
+                        QuicFrameType::Blocked => {}
+                        QuicFrameType::StopWaiting => {}
+                        QuicFrameType::Ping => {}
+                        _ => bail!(IllegalFrameType(frame_type).context("unknown frame")),
+                    }
+                } else {
+                    bail!(IllegalFrameType(frame_type).context("regular frame"))
+                }
+            } else if is_stream_frame(self.quic_version, frame_type) {
+                let (frame, remaining) = QuicStreamFrame::parse(self.quic_version, frame_type, remaining)?;
+
+                payload = remaining;
 
                 if !self.visitor.on_stream_frame(frame) {
                     debug!("Visitor asked to stop further processing.");
 
                     return Ok(());
                 }
-
-                continue;
-            }
-
-            if is_ack_frame(self.quic_version, frame_type) {
-                let frame = QuicAckFrame::parse(
+            } else if is_ack_frame(self.quic_version, frame_type) {
+                let (frame, remaining) = QuicAckFrame::parse(
                     self.quic_version,
                     self.creation_time,
                     self.last_timestamp,
                     frame_type,
-                    payload,
+                    remaining,
                 )?;
+
+                payload = remaining;
 
                 if !self.visitor.on_ack_frame(frame) {
                     debug!("Visitor asked to stop further processing.");
 
                     return Ok(());
                 }
-
-                continue;
+            } else {
+                bail!(IllegalFrameType(frame_type).context("special frame"))
             }
         }
 

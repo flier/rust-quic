@@ -16,8 +16,10 @@ macro_rules! extract_bool {
 
 mod stream;
 mod ack;
+mod padding;
 
 pub use self::ack::{PacketNumberQueue, QuicAckFrame};
+pub use self::padding::QuicPaddingFrame;
 pub use self::stream::QuicStreamFrame;
 
 use types::QuicVersion;
@@ -43,12 +45,16 @@ use types::QuicVersion;
 // Semantics of the flag bits above (the x bits) depends on the frame type.
 
 // Masks to determine if the frame type is a special use and for specific special frame types.
-pub const kQuicFrameTypeSpecialMask: u8 = 0xE0; // 0b 11100000
+const kQuicFrameTypeSpecialMask: u8 = 0xE0; // 0b 11100000
 
 const kQuicFrameTypeStreamMask_Pre40: u8 = 0x80;
 const kQuicFrameTypeStreamMask: u8 = 0xC0;
 const kQuicFrameTypeAckMask_Pre40: u8 = 0x40;
 const kQuicFrameTypeAckMask: u8 = 0xA0;
+
+pub fn is_regular_frame(frame_type: u8) -> bool {
+    (frame_type & kQuicFrameTypeSpecialMask) == 0
+}
 
 pub fn is_stream_frame(quic_version: QuicVersion, frame_type: u8) -> bool {
     match quic_version {

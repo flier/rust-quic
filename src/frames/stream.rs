@@ -40,7 +40,11 @@ pub struct QuicStreamFrame<'a> {
 }
 
 impl<'a> QuicStreamFrame<'a> {
-    pub fn parse(quic_version: QuicVersion, frame_type: u8, payload: &'a [u8]) -> Result<QuicStreamFrame<'a>, Error> {
+    pub fn parse(
+        quic_version: QuicVersion,
+        frame_type: u8,
+        payload: &'a [u8],
+    ) -> Result<(QuicStreamFrame<'a>, &'a [u8]), Error> {
         let (stream_id_length, offset_length, has_data_length, fin) = if quic_version < QuicVersion::QUIC_VERSION_40 {
             let flags = frame_type & !kQuicFrameTypeStreamMask_Pre40;
             (
@@ -81,22 +85,27 @@ impl<'a> QuicStreamFrame<'a> {
             offset_length,
             has_data_length,
         ) {
-            IResult::Done(remaining, (stream_id, offset, data_len)) => Ok(QuicStreamFrame {
-                stream_id,
-                offset,
-                fin,
-                data: if let Some(len) = data_len {
+            IResult::Done(remaining, (stream_id, offset, data_len)) => {
+                let (data, remaining) = if let Some(len) = data_len {
                     if len > remaining.len() {
                         bail!(IncompletePacket(nom::Needed::Size(len)).context("incomplete data frame."))
-                    } else {
-                        let data = &remaining[..len];
-
-                        data.into()
                     }
+
+                    (remaining[..len].into(), &remaining[len..])
                 } else {
-                    remaining.into()
-                },
-            }),
+                    (remaining.into(), &b""[..])
+                };
+
+                Ok((
+                    QuicStreamFrame {
+                        stream_id,
+                        offset,
+                        fin,
+                        data,
+                    },
+                    remaining,
+                ))
+            }
             IResult::Incomplete(needed) => bail!(IncompletePacket(needed).context("incomplete data frame.")),
             IResult::Error(err) => bail!(QuicError::from(err).context("unable to process data frame.")),
         }
@@ -129,12 +138,14 @@ named_args!(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use types::QuicFrameType;
 
     const kStreamId: QuicStreamId = 0x01020304;
     const kStreamOffset: QuicStreamOffset = 0xBA98FEDC32107654;
 
     #[test]
     fn parse_frame() {
+        #[cfg_attr(rustfmt, rustfmt_skip)]
         const test_cases: &[(QuicVersion, u8, &[u8])] = &[
             (
                 QuicVersion::QUIC_VERSION_38,
@@ -205,7 +216,7 @@ mod tests {
         for &(quic_version, frame_type, packet) in test_cases {
             assert_eq!(
                 QuicStreamFrame::parse(quic_version, frame_type, packet).unwrap(),
-                stream_frame,
+                (stream_frame.clone(), &[QuicFrameType::Padding as u8, 0][..]),
                 "parse stream frame, version {:?}",
                 quic_version,
             );

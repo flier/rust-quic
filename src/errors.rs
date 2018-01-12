@@ -26,7 +26,7 @@ pub enum QuicError {
 
     #[fail(display = "invalid parameter, {:?}", _0)] InvalidParam(QuicTag),
 
-    #[fail(display = "invalid frame type, {}", _0)] InvalidFrameType(u8),
+    #[fail(display = "illegal frame type, {}", _0)] IllegalFrameType(u8),
 
     #[fail(display = "nonce length mismatch, {}", _0)] NonceLenMismatch(usize),
 

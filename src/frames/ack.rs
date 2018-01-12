@@ -35,7 +35,7 @@ impl QuicAckFrame {
         last_timestamp: QuicTimeDelta,
         frame_type: u8,
         payload: &[u8],
-    ) -> Result<QuicAckFrame, Error> {
+    ) -> Result<(QuicAckFrame, &[u8]), Error> {
         let has_ack_blocks = extract_bool!(
             frame_type,
             if quic_version < QuicVersion::QUIC_VERSION_40 {
@@ -77,7 +77,7 @@ impl QuicAckFrame {
                     remaining
                 );
 
-                Ok(frame)
+                Ok((frame, remaining))
             }
             IResult::Incomplete(needed) => bail!(IncompletePacket(needed).context("incomplete ack frame.")),
             IResult::Error(err) => bail!(QuicError::from(err).context("unable to process ack frame.")),
@@ -267,7 +267,7 @@ mod tests {
                     frame_type,
                     packet
                 ).unwrap(),
-                frame,
+                (frame.clone(), &[][..]),
                 "parse ACK frame, version {:?}",
                 quic_version,
             );
@@ -413,7 +413,7 @@ mod tests {
                     frame_type,
                     packet
                 ).unwrap(),
-                frame,
+                (frame.clone(), &[][..]),
                 "parse ACK frame with one ack block, version {:?}",
                 quic_version,
             );
@@ -581,7 +581,7 @@ mod tests {
                     frame_type,
                     packet
                 ).unwrap(),
-                frame,
+                (frame.clone(), &[][..]),
                 "parse ACK frame with one ack block, version {:?}",
                 quic_version,
             );
