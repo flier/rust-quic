@@ -10,7 +10,9 @@ use types::QuicVersion;
 /// (Ideally, a GOAWAY frame would be sent with enough time that all streams are torn down.)
 #[derive(Clone, Debug, PartialEq)]
 pub struct QuicConnectionCloseFrame<'a> {
+    /// A 32-bit field containing the `QuicErrorCode` which indicates the reason for closing this connection.
     pub error_code: QuicErrorCode,
+    /// An optional human-readable explanation for why the connection was closed.
     pub error_details: Option<&'a str>,
 }
 

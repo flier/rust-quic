@@ -11,7 +11,7 @@ use types::QuicVersion;
 pub struct QuicPaddingFrame {
     /// -1: full padding to the end of a max-sized packet
     /// otherwise: only pad up to num_padding_bytes bytes
-    pub num_padding_bytes: usize,
+    pub num_padding_bytes: isize,
 }
 
 impl QuicPaddingFrame {
@@ -23,7 +23,9 @@ impl QuicPaddingFrame {
         };
 
         Ok((
-            QuicPaddingFrame { num_padding_bytes },
+            QuicPaddingFrame {
+                num_padding_bytes: num_padding_bytes as isize,
+            },
             &payload[num_padding_bytes..],
         ))
     }

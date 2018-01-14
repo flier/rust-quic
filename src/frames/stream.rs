@@ -34,10 +34,17 @@ const kQuicStreamFinShift: usize = 5;
 /// The STREAM frame is used to both implicitly create a stream and to send data on it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct QuicStreamFrame<'a> {
+    /// A variable-sized unsigned ID unique to this stream.
     pub stream_id: QuicStreamId,
-    pub offset: QuicStreamOffset, // Location of this data in the stream.
+    /// A variable-sized unsigned number specifying the byte offset in the stream for this block of data.
+    pub offset: QuicStreamOffset,
+    /// the FIN bit indicates the sender is done sending on this stream and wishes to "half-close".
     pub fin: bool,
-    pub data: Cow<'a, [u8]>,
+    /// An optional data in this stream frame.
+    ///
+    /// The option to omit the length should only be used when the packet is a "full-sized" Packet,
+    /// to avoid the risk of corruption via padding.
+    pub data: Option<Cow<'a, [u8]>>,
 }
 
 impl<'a> QuicStreamFrame<'a> {
@@ -87,14 +94,16 @@ impl<'a> QuicStreamFrame<'a> {
             has_data_length,
         ) {
             IResult::Done(remaining, (stream_id, offset, data_len)) => {
-                let (data, remaining) = if let Some(len) = data_len {
-                    if len > remaining.len() {
-                        bail!(IncompletePacket(nom::Needed::Size(len)).context("incomplete data frame."))
-                    }
+                let (data, remaining) = match data_len {
+                    Some(len) if len > 0 => {
+                        if len > remaining.len() {
+                            bail!(IncompletePacket(nom::Needed::Size(len)).context("incomplete data frame."))
+                        }
 
-                    (remaining[..len].into(), &remaining[len..])
-                } else {
-                    (remaining.into(), &b""[..])
+                        (Some(remaining[..len].into()), &remaining[len..])
+                    }
+                    None if !remaining.is_empty() => (Some(remaining.into()), &b""[..]),
+                    _ => (None, remaining),
                 };
 
                 Ok((
@@ -211,7 +220,7 @@ mod tests {
             stream_id: kStreamId,
             offset: kStreamOffset,
             fin: true,
-            data: Cow::from(&b"hello world!"[..]),
+            data: Some(Cow::from(&b"hello world!"[..])),
         };
 
         for &(quic_version, frame_type, packet) in test_cases {

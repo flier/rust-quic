@@ -12,8 +12,11 @@ use types::{QuicStreamId, QuicStreamOffset, QuicVersion};
 /// or that the receiver did not want to accept the stream, so the stream should be closed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct QuicRstStreamFrame {
+    /// The 32-bit Stream ID of the stream being terminated.
     pub stream_id: QuicStreamId,
+    /// A 32-bit `QuicErrorCode` which indicates why the stream is being closed.
     pub error_code: QuicRstStreamErrorCode,
+    /// A 64-bit unsigned integer indicating the absolute byte offset of the end of data for this stream.
     pub byte_offset: QuicStreamOffset,
 }
 

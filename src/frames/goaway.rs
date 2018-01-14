@@ -9,8 +9,11 @@ use types::{QuicStreamId, QuicVersion};
 /// but the sender of the GOAWAY will not initiate any additional streams, and will not accept any new streams.
 #[derive(Clone, Debug, PartialEq)]
 pub struct QuicGoAwayFrame<'a> {
+    /// A 32-bit field containing the `QuicErrorCode` which indicates the reason for closing this connection.
     error_code: QuicErrorCode,
-    last_good_stream_id: QuicStreamId,
+    /// The last Stream ID which was accepted by the sender of the GOAWAY message.
+    last_good_stream_id: Option<QuicStreamId>,
+    /// An optional human-readable explanation for why the connection was closed.
     reason_phrase: Option<&'a str>,
 }
 
@@ -29,12 +32,12 @@ impl<'a> QuicGoAwayFrame<'a> {
 named_args!(
     parse_quic_go_away_frame(quic_version: QuicVersion)<QuicGoAwayFrame>, do_parse!(
         error_code: error_code!(quic_version.endianness()) >>
-        last_good_stream_id: u32!(quic_version.endianness()) >>
+        stream_id: u32!(quic_version.endianness()) >>
         reason_phrase: string_piece16!(quic_version.endianness()) >>
         (
             QuicGoAwayFrame {
                 error_code,
-                last_good_stream_id,
+                last_good_stream_id: if stream_id > 0 { Some(stream_id) } else { None },
                 reason_phrase,
             }
         )
@@ -85,7 +88,7 @@ mod tests {
 
         let go_away_frame = QuicGoAwayFrame {
             error_code: QuicErrorCode::QUIC_INVALID_ACK_DATA,
-            last_good_stream_id: 0x01020304,
+            last_good_stream_id: Some(0x01020304),
             reason_phrase: Some("because I can"),
         };
 
