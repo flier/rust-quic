@@ -4,6 +4,9 @@ use nom::IResult;
 use errors::{QuicError, QuicErrorCode};
 use types::{QuicStreamId, QuicVersion};
 
+/// The GOAWAY frame allows for notification that the connection should stop being used,
+/// and will likely be aborted in the future. Any active streams will continue to be processed,
+/// but the sender of the GOAWAY will not initiate any additional streams, and will not accept any new streams.
 #[derive(Clone, Debug, PartialEq)]
 pub struct QuicGoAwayFrame<'a> {
     error_code: QuicErrorCode,
@@ -43,7 +46,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_connection_close_frame() {
+    fn parse_go_away_frame() {
         #[cfg_attr(rustfmt, rustfmt_skip)]
         const test_cases: &[(QuicVersion, &[u8])] = &[
             (

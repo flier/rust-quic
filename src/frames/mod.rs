@@ -8,6 +8,7 @@ mod padding;
 mod reset;
 mod conn_close;
 mod goaway;
+mod win_update;
 
 pub use self::ack::{PacketNumberQueue, QuicAckFrame};
 pub use self::conn_close::QuicConnectionCloseFrame;
@@ -15,6 +16,7 @@ pub use self::goaway::QuicGoAwayFrame;
 pub use self::padding::QuicPaddingFrame;
 pub use self::reset::QuicRstStreamFrame;
 pub use self::stream::QuicStreamFrame;
+pub use self::win_update::QuicWindowUpdateFrame;
 
 use types::QuicVersion;
 
