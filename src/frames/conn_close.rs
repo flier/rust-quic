@@ -1,6 +1,5 @@
 use failure::{Error, Fail};
 use nom::IResult;
-use num::FromPrimitive;
 
 use errors::{QuicError, QuicErrorCode};
 use types::QuicVersion;
@@ -32,11 +31,8 @@ impl<'a> QuicConnectionCloseFrame<'a> {
 
 named_args!(
     parse_quic_connection_close_frame(quic_version: QuicVersion)<QuicConnectionCloseFrame>, do_parse!(
-        error_code: map!(u32!(quic_version.endianness()), |code| {
-            QuicErrorCode::from_u32(code).unwrap_or(QuicErrorCode::QUIC_LAST_ERROR)
-        }) >>
-        error_details_len: u16!(quic_version.endianness()) >>
-        error_details: cond!(error_details_len > 0, take_str!(error_details_len)) >>
+        error_code: error_code!(quic_version.endianness()) >>
+        error_details: string_piece16!(quic_version.endianness()) >>
         (
             QuicConnectionCloseFrame {
                 error_code,

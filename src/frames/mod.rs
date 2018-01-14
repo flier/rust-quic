@@ -1,27 +1,17 @@
 #![allow(non_upper_case_globals)]
 
-#[macro_export]
-macro_rules! extract_bits {
-    ($flags:expr, $bits:expr, $offset:expr) => {
-        ($flags >> $offset) & ((1 << $bits) - 1)
-    };
-}
-
-#[macro_export]
-macro_rules! extract_bool {
-    ($flags:expr, $offset:expr) => {
-        0 != extract_bits!($flags, 1, $offset)
-    };
-}
-
+#[macro_use]
+mod macros;
 mod stream;
 mod ack;
 mod padding;
 mod reset;
 mod conn_close;
+mod goaway;
 
 pub use self::ack::{PacketNumberQueue, QuicAckFrame};
 pub use self::conn_close::QuicConnectionCloseFrame;
+pub use self::goaway::QuicGoAwayFrame;
 pub use self::padding::QuicPaddingFrame;
 pub use self::reset::QuicRstStreamFrame;
 pub use self::stream::QuicStreamFrame;

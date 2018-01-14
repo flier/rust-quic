@@ -14,7 +14,7 @@ use constants::kMaxPacketSize;
 use crypto::{CryptoHandshakeMessage, NullDecrypter, QuicDecrypter, kCADR, kPRST, kRNON};
 use errors::QuicError;
 use errors::QuicError::*;
-use frames::{is_ack_frame, is_regular_frame, is_stream_frame, QuicAckFrame, QuicConnectionCloseFrame,
+use frames::{is_ack_frame, is_regular_frame, is_stream_frame, QuicAckFrame, QuicConnectionCloseFrame, QuicGoAwayFrame,
              QuicPaddingFrame, QuicRstStreamFrame, QuicStreamFrame};
 use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketPublicHeader, QuicPublicResetPacket,
              QuicVersionNegotiationPacket};
@@ -70,6 +70,9 @@ pub trait QuicFramerVisitor {
 
     /// Called when a ConnectionCloseFrame has been parsed.
     fn on_connection_close_frame(&self, frame: QuicConnectionCloseFrame) -> bool;
+
+    /// Called when a GoAwayFrame has been parsed.
+    fn on_go_away_frame(&self, frame: QuicGoAwayFrame) -> bool;
 
     /// Called when a packet has been completely processed.
     fn on_packet_complete(&self);
@@ -471,7 +474,17 @@ where
                                 return Ok(());
                             }
                         }
-                        QuicFrameType::GoAway => {}
+                        QuicFrameType::GoAway => {
+                            let (frame, remaining) = QuicGoAwayFrame::parse(self.quic_version, remaining)?;
+
+                            payload = remaining;
+
+                            if !self.visitor.on_go_away_frame(frame) {
+                                debug!("Visitor asked to stop further processing.");
+
+                                return Ok(());
+                            }
+                        }
                         QuicFrameType::WindowUpdate => {}
                         QuicFrameType::Blocked => {}
                         QuicFrameType::StopWaiting => {}

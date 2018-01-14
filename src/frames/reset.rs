@@ -33,9 +33,7 @@ named_args!(
     parse_quic_reset_stream_frame(quic_version: QuicVersion)<QuicRstStreamFrame>, do_parse!(
         stream_id: u32!(quic_version.endianness()) >>
         byte_offset_pre40: cond!(quic_version <= QuicVersion::QUIC_VERSION_39, u64!(quic_version.endianness())) >>
-        error_code: map!(u32!(quic_version.endianness()), |code| {
-            QuicRstStreamErrorCode::from_u32(code).unwrap_or(QuicRstStreamErrorCode::QUIC_STREAM_LAST_ERROR)
-        }) >>
+        error_code: apply!(reset_stream_error_code, quic_version.endianness()) >>
         byte_offset_new: cond!(quic_version > QuicVersion::QUIC_VERSION_39, u64!(quic_version.endianness())) >>
         byte_offset: expr_opt!(byte_offset_pre40.or(byte_offset_new)) >>
         (
@@ -46,6 +44,12 @@ named_args!(
             }
         )
     )
+);
+
+named_args!(
+    reset_stream_error_code(endianness: ::nom::Endianness)<QuicRstStreamErrorCode>, map!(u32!(endianness), |code| {
+        QuicRstStreamErrorCode::from_u32(code).unwrap_or(QuicRstStreamErrorCode::QUIC_STREAM_LAST_ERROR)
+    })
 );
 
 #[cfg(test)]
