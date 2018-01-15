@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 use std::iter;
 use std::marker::PhantomData;
+use std::mem;
 
 use byteorder::NativeEndian;
 use bytes::{BufMut, Bytes};
@@ -141,6 +142,7 @@ where
 
         let mut nonce = self.nonce_prefix.as_ref().to_vec();
 
+        nonce.reserve(mem::size_of::<u64>());
         nonce.put_u64::<NativeEndian>(packet_number);
 
         if nonce.len() != A::algorithm().nonce_len() {
@@ -211,6 +213,7 @@ where
         let key = OpeningKey::new(A::algorithm(), self.key.as_ref())?;
         let mut nonce = self.nonce_prefix.as_ref().to_vec();
 
+        nonce.reserve(mem::size_of::<u64>());
         nonce.put_u64::<NativeEndian>(packet_number);
 
         if nonce.len() != A::algorithm().nonce_len() {
