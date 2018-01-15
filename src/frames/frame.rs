@@ -2,6 +2,7 @@ use failure::Error;
 
 use frames::{QuicAckFrame, QuicBlockedFrame, QuicConnectionCloseFrame, QuicGoAwayFrame, QuicPaddingFrame,
              QuicPingFrame, QuicRstStreamFrame, QuicStopWaitingFrame, QuicStreamFrame, QuicWindowUpdateFrame};
+use types::QuicVersion;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum QuicFrame<'a> {
@@ -18,7 +19,7 @@ pub enum QuicFrame<'a> {
 }
 
 impl<'a> QuicFrame<'a> {
-    pub fn frame_size(&self) -> usize {
+    pub fn frame_size(&self, quic_version: QuicVersion) -> usize {
         match *self {
             QuicFrame::Padding(ref padding) => padding.frame_size(),
             QuicFrame::ResetStream(ref reset_stream) => reset_stream.frame_size(),
@@ -28,7 +29,7 @@ impl<'a> QuicFrame<'a> {
             QuicFrame::Blocked(ref blocked) => blocked.frame_size(),
             QuicFrame::StopWaiting(ref stop_waiting) => stop_waiting.frame_size(),
             QuicFrame::Ping(ref ping) => ping.frame_size(),
-            QuicFrame::Stream(ref stream) => stream.frame_size(),
+            QuicFrame::Stream(ref stream) => stream.frame_size(quic_version),
             QuicFrame::Ack(ref ack) => ack.frame_size(),
         }
     }

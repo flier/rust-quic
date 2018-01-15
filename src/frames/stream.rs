@@ -1,6 +1,7 @@
 #![allow(non_upper_case_globals)]
 
 use std::borrow::Cow;
+use std::mem;
 
 use failure::{Error, Fail};
 use nom::{self, IResult, Needed};
@@ -123,8 +124,11 @@ impl<'a> QuicStreamFrame<'a> {
         }
     }
 
-    pub fn frame_size(&self) -> usize {
-        kQuicFrameTypeSize
+    pub fn frame_size(&self, quic_verion: QuicVersion) -> usize {
+        kQuicFrameTypeSize + stream_id_size(self.stream_id) + stream_offset_size(quic_verion, self.offset)
+            + self.data
+                .as_ref()
+                .map_or(0, |data| mem::size_of::<u16>() + data.len())
     }
 }
 
@@ -151,10 +155,28 @@ named_args!(
     )
 );
 
+fn stream_id_size(stream_id: QuicStreamId) -> usize {
+    (1..4).find(|n| stream_id >> 8 * n == 0).unwrap_or(4)
+}
+
+fn stream_offset_size(quic_verion: QuicVersion, stream_offset: QuicStreamOffset) -> usize {
+    if quic_verion < QuicVersion::QUIC_VERSION_40 {
+        if stream_offset == 0 {
+            0
+        } else {
+            (2..8).find(|n| stream_offset >> 8 * n == 0).unwrap_or(8)
+        }
+    } else {
+        (0..3)
+            .map(|n| n * 2)
+            .find(|n| stream_offset >> 8 * n == 0)
+            .unwrap_or(8)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use types::QuicFrameType;
 
     const kStreamId: QuicStreamId = 0x01020304;
     const kStreamOffset: QuicStreamOffset = 0xBA98FEDC32107654;
@@ -179,8 +201,6 @@ mod tests {
                     b'h',  b'e',  b'l',  b'l',
                     b'o',  b' ',  b'w',  b'o',
                     b'r',  b'l',  b'd',  b'!',
-                    // paddings
-                    0x00, 0x00,
                 ],
             ),
             (
@@ -199,8 +219,6 @@ mod tests {
                     b'h',  b'e',  b'l',  b'l',
                     b'o',  b' ',  b'w',  b'o',
                     b'r',  b'l',  b'd',  b'!',
-                    // paddings
-                    0x00, 0x00,
                 ],
             ),
             (
@@ -219,8 +237,6 @@ mod tests {
                     b'h',  b'e',  b'l',  b'l',
                     b'o',  b' ',  b'w',  b'o',
                     b'r',  b'l',  b'd',  b'!',
-                    // paddings
-                    0x00, 0x00,
                 ],
             ),
         ];
@@ -232,10 +248,11 @@ mod tests {
             data: Some(Cow::from(&b"hello world!"[..])),
         };
 
-        for &(quic_version, packet) in test_cases {
+        for &(quic_version, bytes) in test_cases {
+            assert_eq!(stream_frame.frame_size(quic_version), bytes.len());
             assert_eq!(
-                QuicStreamFrame::parse(quic_version, packet).unwrap(),
-                (stream_frame.clone(), &[QuicFrameType::Padding as u8, 0][..]),
+                QuicStreamFrame::parse(quic_version, bytes).unwrap(),
+                (stream_frame.clone(), &[][..]),
                 "parse stream frame, version {:?}",
                 quic_version,
             );
