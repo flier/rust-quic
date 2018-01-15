@@ -112,7 +112,7 @@ impl QuicAckFrame {
         match self.packets.ranges.iter().fold((0, self.largest_observed + 1), |(acc, last), &(min, max)| {
             (acc + (last - max) / 256 + 1, min)
         }).0 {
-            1 => ack_block_length,
+            0 | 1 => ack_block_length,
             n => mem::size_of::<u8>() + ack_block_length + (n as usize - 1) * (1 + ack_block_length)
         } +
         // Timestamp Section
