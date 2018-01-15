@@ -1,8 +1,11 @@
+use std::mem;
+
 use failure::{Error, Fail};
 use nom::IResult;
 
 use errors::QuicError;
-use types::{QuicStreamId, QuicStreamOffset, QuicVersion};
+use frames::kQuicFrameTypeSize;
+use types::{QuicFrameType, QuicStreamId, QuicStreamOffset, QuicVersion};
 
 /// The GOAWAY frame allows for notification that the connection should stop being used,
 /// and will likely be aborted in the future. Any active streams will continue to be processed,
@@ -29,10 +32,15 @@ impl QuicWindowUpdateFrame {
             IResult::Error(err) => bail!(QuicError::from(err).context("unable to process window update frame.")),
         }
     }
+
+    pub fn frame_size(&self) -> usize {
+        kQuicFrameTypeSize + mem::size_of::<QuicStreamId>() + mem::size_of::<QuicStreamOffset>()
+    }
 }
 
 named_args!(
     parse_quic_window_update_frame(quic_version: QuicVersion)<QuicWindowUpdateFrame>, do_parse!(
+        _frame_type: frame_type!(QuicFrameType::WindowUpdate) >>
         stream_id: u32!(quic_version.endianness()) >>
         byte_offset: u64!(quic_version.endianness()) >>
         (
@@ -55,6 +63,8 @@ mod tests {
             (
                 QuicVersion::QUIC_VERSION_38,
                 &[
+                    // frame type (window update frame)
+                    0x04,
                     // stream id
                     0x04, 0x03, 0x02, 0x01,
                     // byte offset
@@ -65,6 +75,8 @@ mod tests {
             (
                 QuicVersion::QUIC_VERSION_39,
                 &[
+                    // frame type (window update frame)
+                    0x04,
                     // stream id
                     0x01, 0x02, 0x03, 0x04,
                     // error details length
@@ -80,6 +92,7 @@ mod tests {
         };
 
         for &(quic_version, bytes) in test_cases {
+            assert_eq!(window_update_frame.frame_size(), bytes.len());
             assert_eq!(
                 QuicWindowUpdateFrame::parse(quic_version, bytes).unwrap(),
                 (window_update_frame.clone(), &[][..]),

@@ -3,10 +3,11 @@
 use std::borrow::Cow;
 
 use failure::{Error, Fail};
-use nom::{self, IResult};
+use nom::{self, IResult, Needed};
 
+use constants::{kQuicFrameTypeStreamMask, kQuicFrameTypeStreamMask_Pre40};
 use errors::QuicError::{self, IncompletePacket};
-use frames::{kQuicFrameTypeStreamMask, kQuicFrameTypeStreamMask_Pre40};
+use frames::kQuicFrameTypeSize;
 use types::{QuicStreamId, QuicStreamOffset, QuicVersion};
 
 // Stream type format is 11FSSOOD.
@@ -48,77 +49,82 @@ pub struct QuicStreamFrame<'a> {
 }
 
 impl<'a> QuicStreamFrame<'a> {
-    pub fn parse(
-        quic_version: QuicVersion,
-        frame_type: u8,
-        payload: &'a [u8],
-    ) -> Result<(QuicStreamFrame<'a>, &'a [u8]), Error> {
-        let (stream_id_length, offset_length, has_data_length, fin) = if quic_version < QuicVersion::QUIC_VERSION_40 {
-            let flags = frame_type & !kQuicFrameTypeStreamMask_Pre40;
-            (
-                1
-                    + extract_bits!(
+    pub fn parse(quic_version: QuicVersion, payload: &'a [u8]) -> Result<(QuicStreamFrame<'a>, &'a [u8]), Error> {
+        if let Some((&frame_type, remaining)) = payload.split_first() {
+            let (stream_id_length, offset_length, has_data_length, fin) = if quic_version < QuicVersion::QUIC_VERSION_40
+            {
+                let flags = frame_type & !kQuicFrameTypeStreamMask_Pre40;
+                (
+                    1
+                        + extract_bits!(
+                            flags,
+                            kQuicStreamIDLengthNumBits_Pre40,
+                            kQuicStreamIdLengthShift_Pre40
+                        ) as usize,
+                    match extract_bits!(
                         flags,
-                        kQuicStreamIDLengthNumBits_Pre40,
-                        kQuicStreamIdLengthShift_Pre40
-                    ) as usize,
-                match extract_bits!(
-                    flags,
-                    kQuicStreamOffsetNumBits_Pre40,
-                    kQuicStreamOffsetShift_Pre40
-                ) {
-                    0 => 0,
-                    n => n as usize + 1, // There is no encoding for 1 byte, only 0 and 2 through 8.
-                },
-                extract_bool!(flags, kQuicStreamDataLengthShift_Pre40),
-                extract_bool!(flags, kQuicStreamFinShift_Pre40),
-            )
-        } else {
-            let flags = frame_type & !kQuicFrameTypeStreamMask;
-            (
-                1 + extract_bits!(flags, kQuicStreamIDLengthNumBits, kQuicStreamIDLengthShift) as usize,
-                match 1 << extract_bits!(flags, kQuicStreamOffsetNumBits, kQuicStreamOffsetShift) {
-                    1 => 0,
-                    n => n,
-                },
-                extract_bool!(flags, kQuicStreamDataLengthShift),
-                extract_bool!(flags, kQuicStreamFinShift),
-            )
-        };
-
-        match parse_quic_stream_frame(
-            payload,
-            quic_version,
-            stream_id_length,
-            offset_length,
-            has_data_length,
-        ) {
-            IResult::Done(remaining, (stream_id, offset, data_len)) => {
-                let (data, remaining) = match data_len {
-                    Some(len) if len > 0 => {
-                        if len > remaining.len() {
-                            bail!(IncompletePacket(nom::Needed::Size(len)).context("incomplete data frame."))
-                        }
-
-                        (Some(remaining[..len].into()), &remaining[len..])
-                    }
-                    None if !remaining.is_empty() => (Some(remaining.into()), &b""[..]),
-                    _ => (None, remaining),
-                };
-
-                Ok((
-                    QuicStreamFrame {
-                        stream_id,
-                        offset,
-                        fin,
-                        data,
+                        kQuicStreamOffsetNumBits_Pre40,
+                        kQuicStreamOffsetShift_Pre40
+                    ) {
+                        0 => 0,
+                        n => n as usize + 1, // There is no encoding for 1 byte, only 0 and 2 through 8.
                     },
-                    remaining,
-                ))
+                    extract_bool!(flags, kQuicStreamDataLengthShift_Pre40),
+                    extract_bool!(flags, kQuicStreamFinShift_Pre40),
+                )
+            } else {
+                let flags = frame_type & !kQuicFrameTypeStreamMask;
+                (
+                    1 + extract_bits!(flags, kQuicStreamIDLengthNumBits, kQuicStreamIDLengthShift) as usize,
+                    match 1 << extract_bits!(flags, kQuicStreamOffsetNumBits, kQuicStreamOffsetShift) {
+                        1 => 0,
+                        n => n,
+                    },
+                    extract_bool!(flags, kQuicStreamDataLengthShift),
+                    extract_bool!(flags, kQuicStreamFinShift),
+                )
+            };
+
+            match parse_quic_stream_frame(
+                remaining,
+                quic_version,
+                stream_id_length,
+                offset_length,
+                has_data_length,
+            ) {
+                IResult::Done(remaining, (stream_id, offset, data_len)) => {
+                    let (data, remaining) = match data_len {
+                        Some(len) if len > 0 => {
+                            if len > remaining.len() {
+                                bail!(IncompletePacket(nom::Needed::Size(len)).context("incomplete data frame."))
+                            }
+
+                            (Some(remaining[..len].into()), &remaining[len..])
+                        }
+                        None if !remaining.is_empty() => (Some(remaining.into()), &b""[..]),
+                        _ => (None, remaining),
+                    };
+
+                    Ok((
+                        QuicStreamFrame {
+                            stream_id,
+                            offset,
+                            fin,
+                            data,
+                        },
+                        remaining,
+                    ))
+                }
+                IResult::Incomplete(needed) => bail!(IncompletePacket(needed).context("incomplete data frame.")),
+                IResult::Error(err) => bail!(QuicError::from(err).context("unable to process data frame.")),
             }
-            IResult::Incomplete(needed) => bail!(IncompletePacket(needed).context("incomplete data frame.")),
-            IResult::Error(err) => bail!(QuicError::from(err).context("unable to process data frame.")),
+        } else {
+            bail!(IncompletePacket(Needed::Size(1)).context("incomplete data frame."))
         }
+    }
+
+    pub fn frame_size(&self) -> usize {
+        kQuicFrameTypeSize
     }
 }
 
@@ -156,11 +162,12 @@ mod tests {
     #[test]
     fn parse_stream_frame() {
         #[cfg_attr(rustfmt, rustfmt_skip)]
-        const test_cases: &[(QuicVersion, u8, &[u8])] = &[
+        const test_cases: &[(QuicVersion, &[u8])] = &[
             (
                 QuicVersion::QUIC_VERSION_38,
-                0xFF,
                 &[
+                    // frame type (stream frame with fin)
+                    0xFF,
                     // stream id
                     0x04, 0x03, 0x02, 0x01,
                     // offset
@@ -178,8 +185,9 @@ mod tests {
             ),
             (
                 QuicVersion::QUIC_VERSION_39,
-                0xFF,
                 &[
+                    // frame type (stream frame with fin)
+                    0xFF,
                     // stream id
                     0x01, 0x02, 0x03, 0x04,
                     // offset
@@ -197,8 +205,9 @@ mod tests {
             ),
             (
                 QuicVersion::QUIC_VERSION_40,
-                0xFF,
                 &[
+                    // frame type (stream frame with fin)
+                    0xFF,
                     // data length
                     0x00, 0x0c,
                     // stream id
@@ -223,9 +232,9 @@ mod tests {
             data: Some(Cow::from(&b"hello world!"[..])),
         };
 
-        for &(quic_version, frame_type, packet) in test_cases {
+        for &(quic_version, packet) in test_cases {
             assert_eq!(
-                QuicStreamFrame::parse(quic_version, frame_type, packet).unwrap(),
+                QuicStreamFrame::parse(quic_version, packet).unwrap(),
                 (stream_frame.clone(), &[QuicFrameType::Padding as u8, 0][..]),
                 "parse stream frame, version {:?}",
                 quic_version,

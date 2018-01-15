@@ -1,6 +1,8 @@
+use nom::be_u8;
 use num::FromPrimitive;
 
 use errors::QuicErrorCode;
+use types::QuicFrameType;
 
 #[macro_export]
 macro_rules! extract_bits {
@@ -14,6 +16,18 @@ macro_rules! extract_bool {
     ($flags:expr, $offset:expr) => {
         0 != extract_bits!($flags, 1, $offset)
     };
+}
+
+named_args!(
+    pub frame_type(frame_type: QuicFrameType)<u8>,
+        verify!(be_u8, |b| b == frame_type as u8)
+);
+
+#[macro_export]
+macro_rules! frame_type {
+    ($input:expr, $ty:expr) => {
+        $crate::frames::macros::frame_type($input, $ty)
+    }
 }
 
 named_args!(

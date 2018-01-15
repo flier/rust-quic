@@ -1,8 +1,11 @@
+use std::mem;
+
 use failure::{Error, Fail};
 use nom::IResult;
 
 use errors::QuicError;
-use types::{QuicStreamId, QuicVersion};
+use frames::kQuicFrameTypeSize;
+use types::{QuicFrameType, QuicStreamId, QuicVersion};
 
 /// The `BLOCKED` frame is used to indicate to the remote endpoint
 /// that this endpoint believes itself to be flow-control blocked
@@ -25,10 +28,15 @@ impl QuicBlockedFrame {
             IResult::Error(err) => bail!(QuicError::from(err).context("unable to process blocked frame.")),
         }
     }
+
+    pub fn frame_size(&self) -> usize {
+        kQuicFrameTypeSize + mem::size_of::<QuicStreamId>()
+    }
 }
 
 named_args!(
     parse_quic_blocked_frame(quic_version: QuicVersion)<QuicBlockedFrame>, do_parse!(
+        _frame_type: frame_type!(QuicFrameType::Blocked) >>
         stream_id: u32!(quic_version.endianness()) >>
         (
             QuicBlockedFrame {
@@ -51,6 +59,8 @@ mod tests {
             (
                 QuicVersion::QUIC_VERSION_38,
                 &[
+                    // frame type (blocked frame)
+                    0x05,
                     // stream id
                     0x04, 0x03, 0x02, 0x01
                 ],
@@ -58,6 +68,8 @@ mod tests {
             (
                 QuicVersion::QUIC_VERSION_39,
                 &[
+                    // frame type (blocked frame)
+                    0x05,
                     // stream id
                     0x01, 0x02, 0x03, 0x04
                 ],
@@ -68,9 +80,10 @@ mod tests {
             stream_id: kStreamId,
         };
 
-        for &(quic_version, packet) in test_cases {
+        for &(quic_version, bytes) in test_cases {
+            assert_eq!(blocked_frame.frame_size(), bytes.len());
             assert_eq!(
-                QuicBlockedFrame::parse(quic_version, packet).unwrap(),
+                QuicBlockedFrame::parse(quic_version, bytes).unwrap(),
                 (blocked_frame.clone(), &[][..]),
                 "parse blocked frame, version {:?}",
                 quic_version,

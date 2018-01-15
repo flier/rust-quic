@@ -1,8 +1,11 @@
+use std::mem;
+
 use failure::{Error, Fail};
 use nom::IResult;
 
 use errors::{QuicError, QuicErrorCode};
-use types::{QuicStreamId, QuicVersion};
+use frames::{kQuicFrameTypeSize, kStringPieceLenSize};
+use types::{QuicFrameType, QuicStreamId, QuicVersion};
 
 /// The GOAWAY frame allows for notification that the connection should stop being used,
 /// and will likely be aborted in the future. Any active streams will continue to be processed,
@@ -27,10 +30,16 @@ impl<'a> QuicGoAwayFrame<'a> {
             IResult::Error(err) => bail!(QuicError::from(err).context("unable to process go away frame.")),
         }
     }
+
+    pub fn frame_size(&self) -> usize {
+        kQuicFrameTypeSize + mem::size_of::<QuicErrorCode>() + mem::size_of::<QuicStreamId>() + kStringPieceLenSize
+            + self.reason_phrase.map(|s| s.len()).unwrap_or_default()
+    }
 }
 
 named_args!(
     parse_quic_go_away_frame(quic_version: QuicVersion)<QuicGoAwayFrame>, do_parse!(
+        _frame_type: frame_type!(QuicFrameType::GoAway) >>
         error_code: error_code!(quic_version.endianness()) >>
         stream_id: u32!(quic_version.endianness()) >>
         reason_phrase: string_piece16!(quic_version.endianness()) >>
@@ -55,6 +64,8 @@ mod tests {
             (
                 QuicVersion::QUIC_VERSION_38,
                 &[
+                    // frame type (go away frame)
+                    0x03,
                     // error code
                     0x09, 0x00, 0x00, 0x00,
                     // stream id
@@ -71,6 +82,8 @@ mod tests {
             (
                 QuicVersion::QUIC_VERSION_39,
                 &[
+                    // frame type (go away frame)
+                    0x03,
                     // error code
                     0x00, 0x00, 0x00, 0x09,
                     // stream id
@@ -93,6 +106,7 @@ mod tests {
         };
 
         for &(quic_version, bytes) in test_cases {
+            assert_eq!(go_away_frame.frame_size(), bytes.len());
             assert_eq!(
                 QuicGoAwayFrame::parse(quic_version, bytes).unwrap(),
                 (go_away_frame.clone(), &[][..]),

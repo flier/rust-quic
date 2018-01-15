@@ -1,8 +1,11 @@
+use std::mem;
+
 use failure::{Error, Fail};
 use nom::IResult;
 
 use errors::{QuicError, QuicErrorCode};
-use types::QuicVersion;
+use frames::{kQuicFrameTypeSize, kStringPieceLenSize};
+use types::{QuicFrameType, QuicVersion};
 
 /// The `CONNECTION_CLOSE` frame allows for notification that the connection is being closed.
 ///
@@ -29,10 +32,16 @@ impl<'a> QuicConnectionCloseFrame<'a> {
             IResult::Error(err) => bail!(QuicError::from(err).context("unable to process connection close frame.")),
         }
     }
+
+    pub fn frame_size(&self) -> usize {
+        kQuicFrameTypeSize + mem::size_of::<QuicErrorCode>() + kStringPieceLenSize
+            + self.error_details.map(|s| s.len()).unwrap_or_default()
+    }
 }
 
 named_args!(
     parse_quic_connection_close_frame(quic_version: QuicVersion)<QuicConnectionCloseFrame>, do_parse!(
+        _frame_type: frame_type!(QuicFrameType::ConnectionClose) >>
         error_code: error_code!(quic_version.endianness()) >>
         error_details: string_piece16!(quic_version.endianness()) >>
         (
@@ -55,6 +64,8 @@ mod tests {
             (
                 QuicVersion::QUIC_VERSION_38,
                 &[
+                    // frame type (connection close frame)
+                    0x02,
                     // error code
                     0x11, 0x00, 0x00, 0x00,
                     // error details length
@@ -69,6 +80,8 @@ mod tests {
             (
                 QuicVersion::QUIC_VERSION_39,
                 &[
+                    // frame type (connection close frame)
+                    0x02,
                     // error code
                     0x00, 0x00, 0x00, 0x11,
                     // error details length
@@ -87,9 +100,10 @@ mod tests {
             error_details: Some("because I can"),
         };
 
-        for &(quic_version, packet) in test_cases {
+        for &(quic_version, bytes) in test_cases {
+            assert_eq!(connection_close_frame.frame_size(), bytes.len());
             assert_eq!(
-                QuicConnectionCloseFrame::parse(quic_version, packet).unwrap(),
+                QuicConnectionCloseFrame::parse(quic_version, bytes).unwrap(),
                 (connection_close_frame.clone(), &[][..]),
                 "parse connection close frame, version {:?}",
                 quic_version,

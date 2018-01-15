@@ -6,15 +6,14 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 use byteorder::{ByteOrder, NativeEndian, NetworkEndian};
 use bytes::Bytes;
-use failure::{Error, Fail, ResultExt};
+use failure::{Error, ResultExt};
 use nom::{IResult, le_u16};
-use num::FromPrimitive;
 
 use constants::kMaxPacketSize;
 use crypto::{CryptoHandshakeMessage, NullDecrypter, QuicDecrypter, kCADR, kPRST, kRNON};
 use errors::QuicError;
 use errors::QuicError::*;
-use frames::{is_ack_frame, is_regular_frame, is_stream_frame, QuicAckFrame, QuicBlockedFrame, QuicPingFrame,
+use frames::{QuicAckFrame, QuicBlockedFrame, QuicPingFrame, kQuicFrameTypeSize,
              QuicConnectionCloseFrame, QuicGoAwayFrame, QuicPaddingFrame, QuicRstStreamFrame, QuicStopWaitingFrame,
              QuicStreamFrame, QuicWindowUpdateFrame};
 use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketPublicHeader, QuicPublicResetPacket,
@@ -448,137 +447,150 @@ where
     }
 
     fn process_frame_data(&self, mut payload: &[u8], header: &QuicPacketHeader) -> Result<(), Error> {
-        while let Some((frame_type, remaining)) = payload.split_first() {
-            let frame_type = *frame_type;
+        while let Some(&frame_type) = payload.first() {
+            match QuicFrameType::with_version(self.quic_version, frame_type)? {
+                QuicFrameType::Padding => {
+                    let (frame, remaining) = QuicPaddingFrame::parse(self.quic_version, payload)?;
 
-            if is_regular_frame(frame_type) {
-                if let Some(regular_frame_type) = QuicFrameType::from_u8(frame_type) {
-                    match regular_frame_type {
-                        QuicFrameType::Padding => {
-                            let (frame, remaining) = QuicPaddingFrame::parse(self.quic_version, remaining)?;
+                    debug!("parsed frame: {:?}", frame);
 
-                            payload = remaining;
+                    if !self.visitor.on_padding_frame(frame) {
+                        debug!("Visitor asked to stop further processing.");
 
-                            if !self.visitor.on_padding_frame(frame) {
-                                debug!("Visitor asked to stop further processing.");
-
-                                return Ok(());
-                            }
-                        }
-                        QuicFrameType::ResetStream => {
-                            let (frame, remaining) = QuicRstStreamFrame::parse(self.quic_version, remaining)?;
-
-                            payload = remaining;
-
-                            if !self.visitor.on_reset_stream_frame(frame) {
-                                debug!("Visitor asked to stop further processing.");
-
-                                return Ok(());
-                            }
-                        }
-                        QuicFrameType::ConnectionClose => {
-                            let (frame, remaining) = QuicConnectionCloseFrame::parse(self.quic_version, remaining)?;
-
-                            payload = remaining;
-
-                            if !self.visitor.on_connection_close_frame(frame) {
-                                debug!("Visitor asked to stop further processing.");
-
-                                return Ok(());
-                            }
-                        }
-                        QuicFrameType::GoAway => {
-                            let (frame, remaining) = QuicGoAwayFrame::parse(self.quic_version, remaining)?;
-
-                            payload = remaining;
-
-                            if !self.visitor.on_go_away_frame(frame) {
-                                debug!("Visitor asked to stop further processing.");
-
-                                return Ok(());
-                            }
-                        }
-                        QuicFrameType::WindowUpdate => {
-                            let (frame, remaining) = QuicWindowUpdateFrame::parse(self.quic_version, remaining)?;
-
-                            payload = remaining;
-
-                            if !self.visitor.on_window_update_frame(frame) {
-                                debug!("Visitor asked to stop further processing.");
-
-                                return Ok(());
-                            }
-                        }
-                        QuicFrameType::Blocked => {
-                            let (frame, remaining) = QuicBlockedFrame::parse(self.quic_version, remaining)?;
-
-                            payload = remaining;
-
-                            if !self.visitor.on_blocked_frame(frame) {
-                                debug!("Visitor asked to stop further processing.");
-
-                                return Ok(());
-                            }
-                        }
-                        QuicFrameType::StopWaiting => {
-                            let (frame, remaining) = QuicStopWaitingFrame::parse(
-                                self.quic_version,
-                                header,
-                                remaining,
-                            )?;
-
-                            payload = remaining;
-
-                            if !self.visitor.on_stop_waiting_frame(frame) {
-                                debug!("Visitor asked to stop further processing.");
-
-                                return Ok(());
-                            }
-                        }
-                        QuicFrameType::Ping => {
-                            let frame = QuicPingFrame{};
-
-                            payload = remaining;
-
-                            if !self.visitor.on_ping_frame(frame) {
-                                debug!("Visitor asked to stop further processing.");
-
-                                return Ok(());
-                            }
-                        }
-                        _ => bail!(IllegalFrameType(frame_type).context("unknown frame")),
+                        return Ok(());
                     }
-                } else {
-                    bail!(IllegalFrameType(frame_type).context("regular frame"))
+
+                    payload = remaining;
                 }
-            } else if is_stream_frame(self.quic_version, frame_type) {
-                let (frame, remaining) = QuicStreamFrame::parse(self.quic_version, frame_type, remaining)?;
+                QuicFrameType::ResetStream => {
+                    let (frame, remaining) = QuicRstStreamFrame::parse(self.quic_version, payload)?;
 
-                payload = remaining;
+                    debug!("parsed frame: {:?}", frame);
 
-                if !self.visitor.on_stream_frame(frame) {
-                    debug!("Visitor asked to stop further processing.");
+                    if !self.visitor.on_reset_stream_frame(frame) {
+                        debug!("Visitor asked to stop further processing.");
 
-                    return Ok(());
+                        return Ok(());
+                    }
+
+                    payload = remaining;
                 }
-            } else if is_ack_frame(self.quic_version, frame_type) {
-                let (frame, remaining) = QuicAckFrame::parse(
-                    self.quic_version,
-                    self.creation_time,
-                    self.last_timestamp,
-                    frame_type,
-                    remaining,
-                )?;
+                QuicFrameType::ConnectionClose => {
+                    let (frame, remaining) = QuicConnectionCloseFrame::parse(self.quic_version, payload)?;
 
-                payload = remaining;
+                    debug!("parsed frame: {:?}", frame);
 
-                if !self.visitor.on_ack_frame(frame) {
-                    debug!("Visitor asked to stop further processing.");
+                    if !self.visitor.on_connection_close_frame(frame) {
+                        debug!("Visitor asked to stop further processing.");
 
-                    return Ok(());
+                        return Ok(());
+                    }
+
+                    payload = remaining;
                 }
-            } else {
-                bail!(IllegalFrameType(frame_type).context("special frame"))
+                QuicFrameType::GoAway => {
+                    let (frame, remaining) = QuicGoAwayFrame::parse(self.quic_version, payload)?;
+
+                    debug!("parsed frame: {:?}", frame);
+
+                    if !self.visitor.on_go_away_frame(frame) {
+                        debug!("Visitor asked to stop further processing.");
+
+                        return Ok(());
+                    }
+
+                    payload = remaining;
+                }
+                QuicFrameType::WindowUpdate => {
+                    let (frame, remaining) = QuicWindowUpdateFrame::parse(self.quic_version, payload)?;
+
+                    debug!("parsed frame: {:?}", frame);
+
+                    if !self.visitor.on_window_update_frame(frame) {
+                        debug!("Visitor asked to stop further processing.");
+
+                        return Ok(());
+                    }
+
+                    payload = remaining;
+                }
+                QuicFrameType::Blocked => {
+                    let (frame, remaining) = QuicBlockedFrame::parse(self.quic_version, payload)?;
+
+                    debug!("parsed frame: {:?}", frame);
+
+                    if !self.visitor.on_blocked_frame(frame) {
+                        debug!("Visitor asked to stop further processing.");
+
+                        return Ok(());
+                    }
+
+                    payload = remaining;
+                }
+                QuicFrameType::StopWaiting => {
+                    let (frame, remaining) = QuicStopWaitingFrame::parse(
+                        self.quic_version,
+                        header,
+                        payload,
+                    )?;
+
+                    debug!("parsed frame: {:?}", frame);
+
+                    if !self.visitor.on_stop_waiting_frame(frame) {
+                        debug!("Visitor asked to stop further processing.");
+
+                        return Ok(());
+                    }
+
+                    payload = remaining;
+                }
+                QuicFrameType::Ping => {
+                    let frame = QuicPingFrame{};
+
+                    debug!("parsed frame: {:?}", frame);
+
+                    if !self.visitor.on_ping_frame(frame) {
+                        debug!("Visitor asked to stop further processing.");
+
+                        return Ok(());
+                    }
+
+                    payload = &payload[kQuicFrameTypeSize..];
+                }
+                QuicFrameType::Stream => {
+                    let (frame, remaining) = QuicStreamFrame::parse(self.quic_version, payload)?;
+
+                    debug!("parsed frame: {:?}", frame);
+
+                    if !self.visitor.on_stream_frame(frame) {
+                        debug!("Visitor asked to stop further processing.");
+
+                        return Ok(());
+                    }
+
+                    payload = remaining;
+                }
+                QuicFrameType::Ack => {
+                    let (frame, remaining) = QuicAckFrame::parse(
+                        self.quic_version,
+                        self.creation_time,
+                        self.last_timestamp,
+                        payload,
+                    )?;
+
+                    debug!("parsed frame: {:?}", frame);
+
+                    if !self.visitor.on_ack_frame(frame) {
+                        debug!("Visitor asked to stop further processing.");
+
+                        return Ok(());
+                    }
+
+                    payload = remaining;
+                }
+                _ => {
+                    bail!(IllegalFrameType(frame_type))
+                }
             }
         }
 

@@ -1,9 +1,10 @@
 use failure::{Error, Fail};
-use nom::{self, IResult, be_u8};
+use nom::{self, IResult, Needed, be_u8};
 use time::Duration;
 
 use errors::ParseError::*;
 use errors::QuicError::{self, IncompletePacket};
+use frames::kQuicFrameTypeSize;
 use packet::{read_ack_packet_number_length, QuicPacketNumberLength};
 use types::{QuicPacketNumber, QuicTime, QuicTimeDelta, QuicVersion, ToQuicTimeDelta, UFloat16, ufloat16};
 
@@ -40,47 +41,54 @@ impl QuicAckFrame {
         quic_version: QuicVersion,
         creation_time: QuicTime,
         last_timestamp: QuicTimeDelta,
-        frame_type: u8,
         payload: &[u8],
     ) -> Result<(QuicAckFrame, &[u8]), Error> {
-        let has_ack_blocks = extract_bool!(
-            frame_type,
-            if quic_version < QuicVersion::QUIC_VERSION_40 {
-                kQuicHasMultipleAckBlocksOffset_Pre40
-            } else {
-                kQuicHasMultipleAckBlocksOffset
-            }
-        );
-        let ack_block_length = read_ack_packet_number_length(
-            quic_version,
-            extract_bits!(
+        if let Some((&frame_type, remaining)) = payload.split_first() {
+            let has_ack_blocks = extract_bool!(
                 frame_type,
-                kQuicSequenceNumberLengthNumBits,
-                kActBlockLengthOffset
-            ),
-        );
-        let largest_acked_length = read_ack_packet_number_length(
-            quic_version,
-            extract_bits!(
-                frame_type,
-                kQuicSequenceNumberLengthNumBits,
-                kLargestAckedOffset
-            ),
-        );
+                if quic_version < QuicVersion::QUIC_VERSION_40 {
+                    kQuicHasMultipleAckBlocksOffset_Pre40
+                } else {
+                    kQuicHasMultipleAckBlocksOffset
+                }
+            );
+            let ack_block_length = read_ack_packet_number_length(
+                quic_version,
+                extract_bits!(
+                    frame_type,
+                    kQuicSequenceNumberLengthNumBits,
+                    kActBlockLengthOffset
+                ),
+            );
+            let largest_acked_length = read_ack_packet_number_length(
+                quic_version,
+                extract_bits!(
+                    frame_type,
+                    kQuicSequenceNumberLengthNumBits,
+                    kLargestAckedOffset
+                ),
+            );
 
-        match parse_quic_ack_frame(
-            payload,
-            quic_version,
-            creation_time,
-            last_timestamp,
-            has_ack_blocks,
-            ack_block_length,
-            largest_acked_length,
-        ) {
-            IResult::Done(remaining, frame) => Ok((frame, remaining)),
-            IResult::Incomplete(needed) => bail!(IncompletePacket(needed).context("incomplete ack frame.")),
-            IResult::Error(err) => bail!(QuicError::from(err).context("unable to process ack frame.")),
+            match parse_quic_ack_frame(
+                remaining,
+                quic_version,
+                creation_time,
+                last_timestamp,
+                has_ack_blocks,
+                ack_block_length,
+                largest_acked_length,
+            ) {
+                IResult::Done(remaining, frame) => Ok((frame, remaining)),
+                IResult::Incomplete(needed) => bail!(IncompletePacket(needed).context("incomplete ack frame.")),
+                IResult::Error(err) => bail!(QuicError::from(err).context("unable to process ack frame.")),
+            }
+        } else {
+            bail!(IncompletePacket(Needed::Size(1)).context("incomplete data frame."))
         }
+    }
+
+    pub fn frame_size(&self) -> usize {
+        kQuicFrameTypeSize
     }
 }
 
@@ -201,11 +209,13 @@ mod tests {
     #[test]
     fn one_ack_block() {
         #[cfg_attr(rustfmt, rustfmt_skip)]
-        const test_cases: &[(QuicVersion, u8, &[u8])] = &[
+        const test_cases: &[(QuicVersion, &[u8])] = &[
             (
                 QuicVersion::QUIC_VERSION_38,
-                0x45,
                 &[
+                    // frame type (ack frame)
+                    // (no ack blocks, 2 byte largest observed, 2 byte block length)
+                    0x45,
                     // largest acked
                     0x34, 0x12,
                     // Zero delta time.
@@ -218,8 +228,10 @@ mod tests {
             ),
             (
                 QuicVersion::QUIC_VERSION_39,
-                0x45,
                 &[
+                    // frame type (ack frame)
+                    // (no ack blocks, 2 byte largest observed, 2 byte block length)
+                    0x45,
                     // largest acked
                     0x12, 0x34,
                     // Zero delta time.
@@ -232,8 +244,10 @@ mod tests {
             ),
             (
                 QuicVersion::QUIC_VERSION_40,
-                0x45,
                 &[
+                    // frame type (ack frame)
+                    // (no ack blocks, 2 byte largest observed, 2 byte block length)
+                    0x45,
                     // num timestamps.
                     0x00,
                     // largest acked
@@ -257,15 +271,9 @@ mod tests {
             },
         };
 
-        for &(quic_version, frame_type, packet) in test_cases {
+        for &(quic_version, bytes) in test_cases {
             assert_eq!(
-                QuicAckFrame::parse(
-                    quic_version,
-                    creation_time,
-                    last_timestamp,
-                    frame_type,
-                    packet
-                ).unwrap(),
+                QuicAckFrame::parse(quic_version, creation_time, last_timestamp, bytes).unwrap(),
                 (frame.clone(), &[][..]),
                 "parse ACK frame, version {:?}",
                 quic_version,
@@ -276,11 +284,13 @@ mod tests {
     #[test]
     fn overflow() {
         #[cfg_attr(rustfmt, rustfmt_skip)]
-        const test_cases: &[(QuicVersion, u8, &[u8])] = &[
+        const test_cases: &[(QuicVersion, &[u8])] = &[
             (
                 QuicVersion::QUIC_VERSION_38,
-                0x45,
                 &[
+                    // frame type (ack frame)
+                    // (no ack blocks, 2 byte largest observed, 2 byte block length)
+                    0x45,
                     // largest acked
                     0x34, 0x12,
                     // Zero delta time.
@@ -293,8 +303,10 @@ mod tests {
             ),
             (
                 QuicVersion::QUIC_VERSION_39,
-                0x45,
                 &[
+                    // frame type (ack frame)
+                    // (no ack blocks, 2 byte largest observed, 2 byte block length)
+                    0x45,
                     // largest acked
                     0x12, 0x34,
                     // Zero delta time.
@@ -307,8 +319,10 @@ mod tests {
             ),
             (
                 QuicVersion::QUIC_VERSION_40,
-                0x45,
                 &[
+                    // frame type (ack frame)
+                    // (no ack blocks, 2 byte largest observed, 2 byte block length)
+                    0x45,
                     // num timestamps.
                     0x00,
                     // largest acked
@@ -324,15 +338,9 @@ mod tests {
         let creation_time = time::now().to_timespec();
         let last_timestamp = QuicTimeDelta::zero();
 
-        for &(quic_version, frame_type, packet) in test_cases {
+        for &(quic_version, bytes) in test_cases {
             assert!(
-                QuicAckFrame::parse(
-                    quic_version,
-                    creation_time,
-                    last_timestamp,
-                    frame_type,
-                    packet
-                ).is_err(),
+                QuicAckFrame::parse(quic_version, creation_time, last_timestamp, bytes).is_err(),
                 "parse ACK frame with overflow block length, version {:?}",
                 quic_version,
             );
@@ -342,11 +350,13 @@ mod tests {
     #[test]
     fn one_ack_block_max_length() {
         #[cfg_attr(rustfmt, rustfmt_skip)]
-        const test_cases: &[(QuicVersion, u8, &[u8])] = &[
+        const test_cases: &[(QuicVersion, &[u8])] = &[
             (
                 QuicVersion::QUIC_VERSION_38,
-                0x4D,
                 &[
+                    // frame type (ack frame)
+                    // (one ack block, 6 byte largest observed, 2 byte block length)
+                    0x4D,
                     // largest acked
                     0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12,
                     // Zero delta time.
@@ -359,8 +369,10 @@ mod tests {
             ),
             (
                 QuicVersion::QUIC_VERSION_39,
-                0x4D,
                 &[
+                    // frame type (ack frame)
+                    // (one ack block, 6 byte largest observed, 2 byte block length)
+                    0x4D,
                     // largest acked
                     0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC,
                     // Zero delta time.
@@ -373,8 +385,10 @@ mod tests {
             ),
             (
                 QuicVersion::QUIC_VERSION_40,
-                0xAD,
                 &[
+                    // frame type (ack frame)
+                    // (one ack block, 8 byte largest observed, 2 byte block length)
+                    0xAD,
                     // num timestamps.
                     0x00,
                     // largest acked
@@ -403,15 +417,9 @@ mod tests {
             },
         };
 
-        for &(quic_version, frame_type, packet) in test_cases {
+        for &(quic_version, bytes) in test_cases {
             assert_eq!(
-                QuicAckFrame::parse(
-                    quic_version,
-                    creation_time,
-                    last_timestamp,
-                    frame_type,
-                    packet
-                ).unwrap(),
+                QuicAckFrame::parse(quic_version, creation_time, last_timestamp, bytes).unwrap(),
                 (frame.clone(), &[][..]),
                 "parse ACK frame with one ack block, version {:?}",
                 quic_version,
@@ -422,11 +430,13 @@ mod tests {
     #[test]
     fn two_timestamps_with_multiple_ack_blocks() {
         #[cfg_attr(rustfmt, rustfmt_skip)]
-        const test_cases: &[(QuicVersion, u8, &[u8])] = &[
+        const test_cases: &[(QuicVersion, &[u8])] = &[
             (
                 QuicVersion::QUIC_VERSION_38,
-                0x65,
                 &[
+                    // frame type (ack frame)
+                    // (more than one ack block, 2 byte largest observed, 2 byte block length)
+                    0x65,
                     // largest acked
                     0x34, 0x12,
                     // Zero delta time.
@@ -465,8 +475,10 @@ mod tests {
             ),
             (
                 QuicVersion::QUIC_VERSION_39,
-                0x65,
                 &[
+                    // frame type (ack frame)
+                    // (more than one ack block, 2 byte largest observed, 2 byte block length)
+                    0x65,
                     // largest acked
                     0x12, 0x34,
                     // Zero delta time.
@@ -505,8 +517,10 @@ mod tests {
             ),
             (
                 QuicVersion::QUIC_VERSION_40,
-                0xB5,
                 &[
+                    // frame type (ack frame)
+                    // (more than one ack block, 2 byte largest observed, 2 byte block length)
+                    0xB5,
                     // num ack blocks ranges.
                     0x04,
                     // Number of timestamps.
@@ -571,15 +585,9 @@ mod tests {
             },
         };
 
-        for &(quic_version, frame_type, packet) in test_cases {
+        for &(quic_version, bytes) in test_cases {
             assert_eq!(
-                QuicAckFrame::parse(
-                    quic_version,
-                    creation_time,
-                    last_timestamp,
-                    frame_type,
-                    packet
-                ).unwrap(),
+                QuicAckFrame::parse(quic_version, creation_time, last_timestamp, bytes).unwrap(),
                 (frame.clone(), &[][..]),
                 "parse ACK frame with one ack block, version {:?}",
                 quic_version,

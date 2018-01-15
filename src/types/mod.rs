@@ -6,7 +6,9 @@ mod version;
 #[macro_use]
 mod tag;
 pub mod ufloat16;
+mod frame;
 
+pub use self::frame::QuicFrameType;
 pub use self::tag::{quic_tag, QuicTag};
 pub use self::traits::{Perspective, ToEndianness, ToQuicPacketNumber, ToQuicTimeDelta};
 pub use self::ufloat16::UFloat16;
@@ -35,26 +37,4 @@ pub enum EncryptionLevel {
     None,
     Initial,
     ForwardSecure,
-}
-
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
-pub enum QuicFrameType {
-    // Regular frame types. The values set here cannot change without the
-    // introduction of a new QUIC version.
-    Padding = 0,
-    ResetStream = 1,
-    ConnectionClose = 2,
-    GoAway = 3,
-    WindowUpdate = 4,
-    Blocked = 5,
-    StopWaiting = 6,
-    Ping = 7,
-
-    // STREAM and ACK frames are special frames. They are encoded differently on
-    // the wire and their values do not need to be stable.
-    Stream,
-    Ack,
-    // The path MTU discovery frame is encoded as a PING frame on the wire.
-    MtuDiscovery,
 }

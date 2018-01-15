@@ -1,9 +1,12 @@
+use std::mem;
+
 use failure::{Error, Fail};
 use nom::IResult;
 use num::FromPrimitive;
 
 use errors::{QuicError, QuicRstStreamErrorCode};
-use types::{QuicStreamId, QuicStreamOffset, QuicVersion};
+use frames::kQuicFrameTypeSize;
+use types::{QuicFrameType, QuicStreamId, QuicStreamOffset, QuicVersion};
 
 /// The `RST_STREAM` frame allows for abnormal termination of a stream.
 ///
@@ -30,10 +33,16 @@ impl QuicRstStreamFrame {
             IResult::Error(err) => bail!(QuicError::from(err).context("unable to process reset frame.")),
         }
     }
+
+    pub fn frame_size(&self) -> usize {
+        kQuicFrameTypeSize + mem::size_of::<QuicStreamId>() + mem::size_of::<QuicRstStreamErrorCode>()
+            + mem::size_of::<QuicStreamOffset>()
+    }
 }
 
 named_args!(
     parse_quic_reset_stream_frame(quic_version: QuicVersion)<QuicRstStreamFrame>, do_parse!(
+        _frame_type: frame_type!(QuicFrameType::ResetStream) >>
         stream_id: u32!(quic_version.endianness()) >>
         byte_offset_pre40: cond!(quic_version <= QuicVersion::QUIC_VERSION_39, u64!(quic_version.endianness())) >>
         error_code: apply!(reset_stream_error_code, quic_version.endianness()) >>
@@ -69,6 +78,8 @@ mod tests {
             (
                 QuicVersion::QUIC_VERSION_38,
                 &[
+                    // frame type (rst stream frame)
+                    0x01,
                     // stream id
                     0x04, 0x03, 0x02, 0x01,
                     // sent byte offset
@@ -81,6 +92,8 @@ mod tests {
             (
                 QuicVersion::QUIC_VERSION_39,
                 &[
+                    // frame type (rst stream frame)
+                    0x01,
                     // stream id
                     0x01, 0x02, 0x03, 0x04,
                     // offset
@@ -93,6 +106,8 @@ mod tests {
             (
                 QuicVersion::QUIC_VERSION_40,
                 &[
+                    // frame type (rst stream frame)
+                    0x01,
                     // stream id
                     0x01, 0x02, 0x03, 0x04,
                     // error code
@@ -110,9 +125,10 @@ mod tests {
             byte_offset: kStreamOffset,
         };
 
-        for &(quic_version, packet) in test_cases {
+        for &(quic_version, bytes) in test_cases {
+            assert_eq!(reset_stream_frame.frame_size(), bytes.len());
             assert_eq!(
-                QuicRstStreamFrame::parse(quic_version, packet).unwrap(),
+                QuicRstStreamFrame::parse(quic_version, bytes).unwrap(),
                 (reset_stream_frame.clone(), &[][..]),
                 "parse reset stream frame, version {:?}",
                 quic_version,

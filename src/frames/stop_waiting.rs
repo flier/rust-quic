@@ -1,9 +1,12 @@
+use std::mem;
+
 use failure::{Error, Fail};
 use nom::IResult;
 
 use errors::QuicError;
+use frames::kQuicFrameTypeSize;
 use packet::{QuicPacketHeader, QuicPacketNumberLength};
-use types::{QuicPacketNumber, QuicVersion};
+use types::{QuicFrameType, QuicPacketNumber, QuicVersion};
 
 /// The `STOP_WAITING` frame is sent to inform the peer
 /// that it should not continue to wait for packets with packet numbers lower than a specified value.
@@ -34,6 +37,10 @@ impl QuicStopWaitingFrame {
             IResult::Error(err) => bail!(QuicError::from(err).context("unable to process stop waiting frame.")),
         }
     }
+
+    pub fn frame_size(&self) -> usize {
+        kQuicFrameTypeSize + mem::size_of::<QuicPacketNumber>()
+    }
 }
 
 named_args!(
@@ -41,6 +48,7 @@ named_args!(
                              packet_number_length: QuicPacketNumberLength,
                              packet_number: QuicPacketNumber)<QuicStopWaitingFrame>,
     do_parse!(
+        _frame_type: frame_type!(QuicFrameType::StopWaiting) >>
         least_unacked: verify!(
             uint!(quic_version.endianness(), packet_number_length as usize),
             |least_unacked| least_unacked < packet_number
@@ -69,6 +77,8 @@ mod tests {
             (
                 QuicVersion::QUIC_VERSION_38,
                 &[
+                    // frame type (stop waiting frame)
+                    0x06,
                     // least packet number awaiting an ack, delta from packet number.
                     0x08, 0x00, 0x00, 0x00, 0x00, 0x00
                 ],
@@ -76,6 +86,8 @@ mod tests {
             (
                 QuicVersion::QUIC_VERSION_39,
                 &[
+                    // frame type (stop waiting frame)
+                    0x06,
                     // least packet number awaiting an ack, delta from packet number.
                     0x00, 0x00, 0x00, 0x00, 0x00, 0x08
                 ],
@@ -96,9 +108,10 @@ mod tests {
             least_unacked: kLeastUnacked,
         };
 
-        for &(quic_version, packet) in test_cases {
+        for &(quic_version, bytes) in test_cases {
+            assert_eq!(stop_waiting_frame.frame_size(), bytes.len() + 2); // 8 bytes packet number
             assert_eq!(
-                QuicStopWaitingFrame::parse(quic_version, &header, packet).unwrap(),
+                QuicStopWaitingFrame::parse(quic_version, &header, bytes).unwrap(),
                 (stop_waiting_frame.clone(), &[][..]),
                 "parse blocked frame, version {:?}",
                 quic_version,
