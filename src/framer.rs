@@ -15,8 +15,8 @@ use crypto::{CryptoHandshakeMessage, NullDecrypter, QuicDecrypter, kCADR, kPRST,
 use errors::QuicError;
 use errors::QuicError::*;
 use frames::{is_ack_frame, is_regular_frame, is_stream_frame, QuicAckFrame, QuicBlockedFrame,
-             QuicConnectionCloseFrame, QuicGoAwayFrame, QuicPaddingFrame, QuicRstStreamFrame, QuicStreamFrame,
-             QuicWindowUpdateFrame};
+             QuicConnectionCloseFrame, QuicGoAwayFrame, QuicPaddingFrame, QuicRstStreamFrame, QuicStopWaitingFrame,
+             QuicStreamFrame, QuicWindowUpdateFrame};
 use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketPublicHeader, QuicPublicResetPacket,
              QuicVersionNegotiationPacket};
 use types::{EncryptionLevel, Perspective, QuicFrameType, QuicPacketNumber, QuicTime, QuicTimeDelta, QuicVersion,
@@ -80,6 +80,9 @@ pub trait QuicFramerVisitor {
 
     /// Called when a `QuicBlockedFrame` has been parsed.
     fn on_blocked_frame(&self, frame: QuicBlockedFrame) -> bool;
+
+    /// Called when a `QuicStopWaitingFrame` has been parsed.
+    fn on_stop_waiting_frame(&self, frame: QuicStopWaitingFrame) -> bool;
 
     /// Called when a packet has been completely processed.
     fn on_packet_complete(&self);
@@ -441,7 +444,7 @@ where
         self.largest_packet_number = cmp::max(self.largest_packet_number, header.packet_number);
     }
 
-    fn process_frame_data(&self, mut payload: &[u8], _header: &QuicPacketHeader) -> Result<(), Error> {
+    fn process_frame_data(&self, mut payload: &[u8], header: &QuicPacketHeader) -> Result<(), Error> {
         while let Some((frame_type, remaining)) = payload.split_first() {
             let frame_type = *frame_type;
 
@@ -514,7 +517,21 @@ where
                                 return Ok(());
                             }
                         }
-                        QuicFrameType::StopWaiting => {}
+                        QuicFrameType::StopWaiting => {
+                            let (frame, remaining) = QuicStopWaitingFrame::parse(
+                                self.quic_version,
+                                header,
+                                remaining,
+                            )?;
+
+                            payload = remaining;
+
+                            if !self.visitor.on_stop_waiting_frame(frame) {
+                                debug!("Visitor asked to stop further processing.");
+
+                                return Ok(());
+                            }
+                        }
                         QuicFrameType::Ping => {}
                         _ => bail!(IllegalFrameType(frame_type).context("unknown frame")),
                     }

@@ -23,19 +23,19 @@ const kDiversificationNonceSize: usize = 32;
 
 pub type QuicPacketNumberLengthFlags = u8;
 
-const PACKET_FLAGS_1BYTE_PACKET: QuicPacketNumberLengthFlags = 0; // 00
-const PACKET_FLAGS_2BYTE_PACKET: QuicPacketNumberLengthFlags = 1; // 01
-const PACKET_FLAGS_4BYTE_PACKET: QuicPacketNumberLengthFlags = 1 << 1; // 10
-const PACKET_FLAGS_8BYTE_PACKET: QuicPacketNumberLengthFlags = 1 << 1 | 1; // 11
+pub const PACKET_FLAGS_1BYTE_PACKET: QuicPacketNumberLengthFlags = 0; // 00
+pub const PACKET_FLAGS_2BYTE_PACKET: QuicPacketNumberLengthFlags = 1; // 01
+pub const PACKET_FLAGS_4BYTE_PACKET: QuicPacketNumberLengthFlags = 1 << 1; // 10
+pub const PACKET_FLAGS_8BYTE_PACKET: QuicPacketNumberLengthFlags = 1 << 1 | 1; // 11
 
 pub type QuicPacketNumberLength = u8;
 
-const PACKET_1BYTE_PACKET_NUMBER: QuicPacketNumberLength = 1;
-const PACKET_2BYTE_PACKET_NUMBER: QuicPacketNumberLength = 2;
-const PACKET_4BYTE_PACKET_NUMBER: QuicPacketNumberLength = 4;
+pub const PACKET_1BYTE_PACKET_NUMBER: QuicPacketNumberLength = 1;
+pub const PACKET_2BYTE_PACKET_NUMBER: QuicPacketNumberLength = 2;
+pub const PACKET_4BYTE_PACKET_NUMBER: QuicPacketNumberLength = 4;
 // TODO(rch): Remove this when we remove QUIC_VERSION_39.
-const PACKET_6BYTE_PACKET_NUMBER: QuicPacketNumberLength = 6;
-const PACKET_8BYTE_PACKET_NUMBER: QuicPacketNumberLength = 8;
+pub const PACKET_6BYTE_PACKET_NUMBER: QuicPacketNumberLength = 6;
+pub const PACKET_8BYTE_PACKET_NUMBER: QuicPacketNumberLength = 8;
 
 pub fn read_ack_packet_number_length(
     version: QuicVersion,
@@ -218,7 +218,7 @@ macro_rules! u48 (
 macro_rules! uint (
     ($input:expr, $endianness:expr, $nbytes:expr) => (
         if $nbytes < 1 || $nbytes > 8 {
-            ::nom::IResult::Error(nom::Err::Code(::nom::ErrorKind::Tag))
+            ::nom::IResult::Error(::nom::Err::Code(::nom::ErrorKind::Tag))
         } else if $input.len() < $nbytes {
             ::nom::IResult::Incomplete(::nom::Needed::Size($nbytes))
         } else {

@@ -10,6 +10,7 @@ mod conn_close;
 mod goaway;
 mod win_update;
 mod blocked;
+mod stop_waiting;
 
 pub use self::ack::{PacketNumberQueue, QuicAckFrame};
 pub use self::blocked::QuicBlockedFrame;
@@ -17,6 +18,7 @@ pub use self::conn_close::QuicConnectionCloseFrame;
 pub use self::goaway::QuicGoAwayFrame;
 pub use self::padding::QuicPaddingFrame;
 pub use self::reset::QuicRstStreamFrame;
+pub use self::stop_waiting::QuicStopWaitingFrame;
 pub use self::stream::QuicStreamFrame;
 pub use self::win_update::QuicWindowUpdateFrame;
 
