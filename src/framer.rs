@@ -14,7 +14,7 @@ use constants::kMaxPacketSize;
 use crypto::{CryptoHandshakeMessage, NullDecrypter, QuicDecrypter, kCADR, kPRST, kRNON};
 use errors::QuicError;
 use errors::QuicError::*;
-use frames::{is_ack_frame, is_regular_frame, is_stream_frame, QuicAckFrame, QuicBlockedFrame,
+use frames::{is_ack_frame, is_regular_frame, is_stream_frame, QuicAckFrame, QuicBlockedFrame, QuicPingFrame,
              QuicConnectionCloseFrame, QuicGoAwayFrame, QuicPaddingFrame, QuicRstStreamFrame, QuicStopWaitingFrame,
              QuicStreamFrame, QuicWindowUpdateFrame};
 use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketPublicHeader, QuicPublicResetPacket,
@@ -83,6 +83,9 @@ pub trait QuicFramerVisitor {
 
     /// Called when a `QuicStopWaitingFrame` has been parsed.
     fn on_stop_waiting_frame(&self, frame: QuicStopWaitingFrame) -> bool;
+
+    /// Called when a PingFrame has been parsed.
+    fn on_ping_frame(&self, frame: QuicPingFrame) -> bool;
 
     /// Called when a packet has been completely processed.
     fn on_packet_complete(&self);
@@ -532,7 +535,17 @@ where
                                 return Ok(());
                             }
                         }
-                        QuicFrameType::Ping => {}
+                        QuicFrameType::Ping => {
+                            let frame = QuicPingFrame{};
+
+                            payload = remaining;
+
+                            if !self.visitor.on_ping_frame(frame) {
+                                debug!("Visitor asked to stop further processing.");
+
+                                return Ok(());
+                            }
+                        }
                         _ => bail!(IllegalFrameType(frame_type).context("unknown frame")),
                     }
                 } else {

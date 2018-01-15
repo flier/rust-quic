@@ -73,3 +73,8 @@ pub fn is_ack_frame(quic_version: QuicVersion, frame_type: u8) -> bool {
         _ => (frame_type & kQuicFrameTypeAckMask) == kQuicFrameTypeAckMask,
     }
 }
+
+/// A ping frame contains no payload, though it is retransmittable,
+/// and ACK'd just like other normal frames.
+#[derive(Clone, Debug, PartialEq)]
+pub struct QuicPingFrame {}
