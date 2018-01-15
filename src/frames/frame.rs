@@ -30,7 +30,7 @@ impl<'a> QuicFrame<'a> {
             QuicFrame::StopWaiting(ref stop_waiting) => stop_waiting.frame_size(),
             QuicFrame::Ping(ref ping) => ping.frame_size(),
             QuicFrame::Stream(ref stream) => stream.frame_size(quic_version),
-            QuicFrame::Ack(ref ack) => ack.frame_size(),
+            QuicFrame::Ack(ref ack) => ack.frame_size(quic_version),
         }
     }
 }

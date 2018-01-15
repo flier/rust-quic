@@ -125,10 +125,16 @@ impl<'a> QuicStreamFrame<'a> {
     }
 
     pub fn frame_size(&self, quic_verion: QuicVersion) -> usize {
-        kQuicFrameTypeSize + stream_id_size(self.stream_id) + stream_offset_size(quic_verion, self.offset)
-            + self.data
-                .as_ref()
-                .map_or(0, |data| mem::size_of::<u16>() + data.len())
+        // Frame Type
+        kQuicFrameTypeSize +
+        // Stream ID
+        stream_id_size(self.stream_id) +
+        // Offset
+        stream_offset_size(quic_verion, self.offset) +
+        // Data
+        self.data
+            .as_ref()
+            .map_or(0, |data| mem::size_of::<u16>() + data.len())
     }
 }
 

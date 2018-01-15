@@ -1,3 +1,5 @@
+use std::mem;
+
 use failure::{Error, Fail};
 use nom::{self, IResult, Needed, be_u8};
 use time::Duration;
@@ -5,7 +7,9 @@ use time::Duration;
 use errors::ParseError::*;
 use errors::QuicError::{self, IncompletePacket};
 use frames::kQuicFrameTypeSize;
-use packet::{read_ack_packet_number_length, QuicPacketNumberLength};
+use packet::{read_ack_packet_number_length, PACKET_1BYTE_PACKET_NUMBER, PACKET_2BYTE_PACKET_NUMBER,
+             PACKET_4BYTE_PACKET_NUMBER, PACKET_6BYTE_PACKET_NUMBER, PACKET_8BYTE_PACKET_NUMBER,
+             QuicPacketNumberLength};
 use types::{QuicPacketNumber, QuicTime, QuicTimeDelta, QuicVersion, ToQuicTimeDelta, UFloat16, ufloat16};
 
 // packet number size shift used in AckFrames.
@@ -87,8 +91,35 @@ impl QuicAckFrame {
         }
     }
 
-    pub fn frame_size(&self) -> usize {
-        kQuicFrameTypeSize
+    pub fn frame_size(&self, quic_version: QuicVersion) -> usize {
+        let ack_block_length = packet_number_size(
+            quic_version,
+            self.packets
+                .ranges
+                .iter()
+                .map(|&(min, max)| max - min)
+                .max()
+                .unwrap_or(0),
+        );
+
+        // Frame Type:
+        kQuicFrameTypeSize +
+        // Largest Acked
+        packet_number_size(quic_version, self.largest_observed) +
+        // Largest Acked Delta Time
+        mem::size_of::<u16>() +
+        // Ack Block
+        match self.packets.ranges.iter().fold((0, self.largest_observed + 1), |(acc, last), &(min, max)| {
+            (acc + (last - max) / 256 + 1, min)
+        }).0 {
+            1 => ack_block_length,
+            n => mem::size_of::<u8>() + ack_block_length + (n as usize - 1) * (1 + ack_block_length)
+        } +
+        // Timestamp Section
+        mem::size_of::<u8>()
+            + self.received_packet_times
+                .as_ref()
+                .map_or(0, |times| times.len() * 3 + 2)
     }
 }
 
@@ -187,6 +218,21 @@ named_args!(parse_quic_ack_frame(quic_version: QuicVersion,
     )
 );
 
+fn packet_number_size(quic_version: QuicVersion, packet_number: QuicPacketNumber) -> usize {
+    [
+        PACKET_1BYTE_PACKET_NUMBER,
+        PACKET_2BYTE_PACKET_NUMBER,
+        PACKET_4BYTE_PACKET_NUMBER,
+    ].into_iter()
+        .cloned()
+        .find(|&n| packet_number < 1 << 8 * n as usize)
+        .unwrap_or(if quic_version <= QuicVersion::QUIC_VERSION_39 {
+            PACKET_6BYTE_PACKET_NUMBER
+        } else {
+            PACKET_8BYTE_PACKET_NUMBER
+        }) as usize
+}
+
 /// A sequence of packet numbers where each number is unique.
 ///
 /// Intended to be used in a sliding window fashion,
@@ -262,7 +308,7 @@ mod tests {
 
         let creation_time = time::now().to_timespec();
         let last_timestamp = QuicTimeDelta::zero();
-        let frame = QuicAckFrame {
+        let ack_frame = QuicAckFrame {
             largest_observed: kSmallLargestObserved,
             ack_delay_time: QuicTimeDelta::zero(),
             received_packet_times: None,
@@ -273,8 +319,15 @@ mod tests {
 
         for &(quic_version, bytes) in test_cases {
             assert_eq!(
+                ack_frame.frame_size(quic_version),
+                bytes.len(),
+                "calculate ACK frame size: {:?}, version {:?}",
+                ack_frame,
+                quic_version
+            );
+            assert_eq!(
                 QuicAckFrame::parse(quic_version, creation_time, last_timestamp, bytes).unwrap(),
-                (frame.clone(), &[][..]),
+                (ack_frame.clone(), &[][..]),
                 "parse ACK frame, version {:?}",
                 quic_version,
             );
@@ -403,7 +456,7 @@ mod tests {
 
         let creation_time = time::now().to_timespec();
         let last_timestamp = QuicTimeDelta::zero();
-        let frame = QuicAckFrame {
+        let ack_frame = QuicAckFrame {
             largest_observed: kLargeLargestObserved,
             ack_delay_time: QuicTimeDelta::zero(),
             received_packet_times: None,
@@ -419,8 +472,15 @@ mod tests {
 
         for &(quic_version, bytes) in test_cases {
             assert_eq!(
+                ack_frame.frame_size(quic_version),
+                bytes.len(),
+                "calculate ACK frame size: {:?}, version {:?}",
+                ack_frame,
+                quic_version
+            );
+            assert_eq!(
                 QuicAckFrame::parse(quic_version, creation_time, last_timestamp, bytes).unwrap(),
-                (frame.clone(), &[][..]),
+                (ack_frame.clone(), &[][..]),
                 "parse ACK frame with one ack block, version {:?}",
                 quic_version,
             );
@@ -561,7 +621,7 @@ mod tests {
 
         let creation_time = time::now().to_timespec();
         let last_timestamp = QuicTimeDelta::zero();
-        let frame = QuicAckFrame {
+        let ack_frame = QuicAckFrame {
             largest_observed: kSmallLargestObserved,
             ack_delay_time: QuicTimeDelta::zero(),
             received_packet_times: Some(vec![
@@ -587,8 +647,15 @@ mod tests {
 
         for &(quic_version, bytes) in test_cases {
             assert_eq!(
+                ack_frame.frame_size(quic_version),
+                bytes.len(),
+                "calculate ACK frame size: {:?}, version {:?}",
+                ack_frame,
+                quic_version
+            );
+            assert_eq!(
                 QuicAckFrame::parse(quic_version, creation_time, last_timestamp, bytes).unwrap(),
-                (frame.clone(), &[][..]),
+                (ack_frame.clone(), &[][..]),
                 "parse ACK frame with one ack block, version {:?}",
                 quic_version,
             );
