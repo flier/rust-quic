@@ -14,8 +14,9 @@ use constants::kMaxPacketSize;
 use crypto::{CryptoHandshakeMessage, NullDecrypter, QuicDecrypter, kCADR, kPRST, kRNON};
 use errors::QuicError;
 use errors::QuicError::*;
-use frames::{is_ack_frame, is_regular_frame, is_stream_frame, QuicAckFrame, QuicConnectionCloseFrame, QuicGoAwayFrame,
-             QuicPaddingFrame, QuicRstStreamFrame, QuicStreamFrame, QuicWindowUpdateFrame};
+use frames::{is_ack_frame, is_regular_frame, is_stream_frame, QuicAckFrame, QuicBlockedFrame,
+             QuicConnectionCloseFrame, QuicGoAwayFrame, QuicPaddingFrame, QuicRstStreamFrame, QuicStreamFrame,
+             QuicWindowUpdateFrame};
 use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketPublicHeader, QuicPublicResetPacket,
              QuicVersionNegotiationPacket};
 use types::{EncryptionLevel, Perspective, QuicFrameType, QuicPacketNumber, QuicTime, QuicTimeDelta, QuicVersion,
@@ -57,25 +58,28 @@ pub trait QuicFramerVisitor {
     /// If `on_stream_frame` returns false, the framer will stop parsing the current packet.
     fn on_stream_frame(&self, frame: QuicStreamFrame) -> bool;
 
-    /// Called when a AckFrame has been parsed.
+    /// Called when a `QuicAckFrame` has been parsed.
     ///
     /// If `on_ack_frame` returns false, the framer will stop parsing the current packet.
     fn on_ack_frame(&self, frame: QuicAckFrame) -> bool;
 
-    /// Called when a QuicPaddingFrame has been parsed.
+    /// Called when a `QuicPaddingFrame` has been parsed.
     fn on_padding_frame(&self, frame: QuicPaddingFrame) -> bool;
 
-    /// Called when a RstStreamFrame has been parsed.
+    /// Called when a `QuicRstStreamFrame` has been parsed.
     fn on_reset_stream_frame(&self, frame: QuicRstStreamFrame) -> bool;
 
-    /// Called when a ConnectionCloseFrame has been parsed.
+    /// Called when a `QuicConnectionCloseFrame` has been parsed.
     fn on_connection_close_frame(&self, frame: QuicConnectionCloseFrame) -> bool;
 
-    /// Called when a GoAwayFrame has been parsed.
+    /// Called when a `QuicGoAwayFrame` has been parsed.
     fn on_go_away_frame(&self, frame: QuicGoAwayFrame) -> bool;
 
-    /// Called when a WindowUpdateFrame has been parsed.
+    /// Called when a `QuicWindowUpdateFrame` has been parsed.
     fn on_window_update_frame(&self, frame: QuicWindowUpdateFrame) -> bool;
+
+    /// Called when a `QuicBlockedFrame` has been parsed.
+    fn on_blocked_frame(&self, frame: QuicBlockedFrame) -> bool;
 
     /// Called when a packet has been completely processed.
     fn on_packet_complete(&self);
@@ -499,7 +503,17 @@ where
                                 return Ok(());
                             }
                         }
-                        QuicFrameType::Blocked => {}
+                        QuicFrameType::Blocked => {
+                            let (frame, remaining) = QuicBlockedFrame::parse(self.quic_version, remaining)?;
+
+                            payload = remaining;
+
+                            if !self.visitor.on_blocked_frame(frame) {
+                                debug!("Visitor asked to stop further processing.");
+
+                                return Ok(());
+                            }
+                        }
                         QuicFrameType::StopWaiting => {}
                         QuicFrameType::Ping => {}
                         _ => bail!(IllegalFrameType(frame_type).context("unknown frame")),

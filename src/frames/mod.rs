@@ -9,8 +9,10 @@ mod reset;
 mod conn_close;
 mod goaway;
 mod win_update;
+mod blocked;
 
 pub use self::ack::{PacketNumberQueue, QuicAckFrame};
+pub use self::blocked::QuicBlockedFrame;
 pub use self::conn_close::QuicConnectionCloseFrame;
 pub use self::goaway::QuicGoAwayFrame;
 pub use self::padding::QuicPaddingFrame;

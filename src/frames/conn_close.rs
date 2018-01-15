@@ -91,7 +91,7 @@ mod tests {
             assert_eq!(
                 QuicConnectionCloseFrame::parse(quic_version, packet).unwrap(),
                 (connection_close_frame.clone(), &[][..]),
-                "parse connection close stream frame, version {:?}",
+                "parse connection close frame, version {:?}",
                 quic_version,
             );
         }
