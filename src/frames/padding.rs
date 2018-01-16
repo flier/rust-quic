@@ -1,7 +1,11 @@
+use byteorder::ByteOrder;
+use bytes::BufMut;
 use failure::Error;
 
+use constants::kQuicFrameTypeSize;
 use errors::QuicError;
-use frames::kQuicFrameTypeSize;
+use frames::{FromWire, ToWire};
+use packet::QuicPacketHeader;
 use types::{QuicFrameType, QuicVersion};
 
 /// The `PADDING` frame pads a packet with 0x00 bytes.
@@ -16,8 +20,15 @@ pub struct QuicPaddingFrame {
     pub num_padding_bytes: isize,
 }
 
-impl QuicPaddingFrame {
-    pub fn parse(quic_version: QuicVersion, payload: &[u8]) -> Result<(QuicPaddingFrame, &[u8]), Error> {
+impl<'a> FromWire<'a> for QuicPaddingFrame {
+    type Frame = QuicPaddingFrame;
+    type Error = Error;
+
+    fn parse(
+        quic_version: QuicVersion,
+        _header: &QuicPacketHeader,
+        payload: &'a [u8],
+    ) -> Result<(Self::Frame, &'a [u8]), Self::Error> {
         match payload.split_first() {
             Some((&frame_type, remaining)) if frame_type == QuicFrameType::Padding as u8 => {
                 let num_padding_bytes = if quic_version < QuicVersion::QUIC_VERSION_37 {
@@ -38,9 +49,41 @@ impl QuicPaddingFrame {
             )),
         }
     }
+}
 
-    pub fn frame_size(&self) -> usize {
-        kQuicFrameTypeSize + self.num_padding_bytes as usize
+impl ToWire for QuicPaddingFrame {
+    type Frame = QuicPaddingFrame;
+    type Error = Error;
+
+    fn frame_size(&self, _quic_version: QuicVersion, _header: &QuicPacketHeader) -> usize {
+        // Frame Type
+        kQuicFrameTypeSize +
+        // Padding Bytes
+        self.num_padding_bytes as usize
+    }
+
+    fn write_to<E, T>(
+        &self,
+        quic_version: QuicVersion,
+        header: &QuicPacketHeader,
+        buf: &mut T,
+    ) -> Result<usize, Self::Error>
+    where
+        E: ByteOrder,
+        T: BufMut,
+    {
+        let frame_size = self.frame_size(quic_version, header);
+
+        if buf.remaining_mut() < frame_size {
+            bail!(QuicError::NotEnoughBuffer(frame_size))
+        }
+
+        // Frame Type
+        buf.put_u8(QuicFrameType::Padding as u8);
+        // Padding Bytes
+        buf.put(vec![0u8; self.num_padding_bytes as usize]);
+
+        Ok(frame_size)
     }
 }
 
@@ -49,46 +92,82 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_padding_frame() {
+    fn padding_frame() {
         #[cfg_attr(rustfmt, rustfmt_skip)]
-        const bytes: &[u8] = &[
-            // frame type (padding frame)
-            0x00,
-            0x00, 0x00,
-            // Ignored data (which in this case is a stream frame)
-            // frame type (stream frame with fin)
-            0xFF,
-            // stream id
-            0x04, 0x03, 0x02, 0x01,
-            // offset
-            0x54, 0x76, 0x10, 0x32,
-            0xDC, 0xFE, 0x98, 0xBA,
-            // data length
-            0x0c, 0x00,
-            // data
-            b'h',  b'e',  b'l',  b'l',
-            b'o',  b' ',  b'w',  b'o',
-            b'r',  b'l',  b'd',  b'!',
+        const test_cases: &[(QuicVersion, isize, &[u8])] = &[
+            (
+                QuicVersion::QUIC_VERSION_35,
+                29,
+                &[
+                    // frame type (padding frame)
+                    0x00,
+                    0x00, 0x00,
+                    // Ignored data (which in this case is a stream frame)
+                    // frame type (stream frame with fin)
+                    0xFF,
+                    // stream id
+                    0x04, 0x03, 0x02, 0x01,
+                    // offset
+                    0x54, 0x76, 0x10, 0x32,
+                    0xDC, 0xFE, 0x98, 0xBA,
+                    // data length
+                    0x0c, 0x00,
+                    // data
+                    b'h',  b'e',  b'l',  b'l',
+                    b'o',  b' ',  b'w',  b'o',
+                    b'r',  b'l',  b'd',  b'!',
+                ]
+            ),
+            (
+                QuicVersion::QUIC_VERSION_37,
+                2,
+                &[
+                    // frame type (padding frame)
+                    0x00,
+                    0x00, 0x00,
+                    // Ignored data (which in this case is a stream frame)
+                    // frame type (stream frame with fin)
+                    0xFF,
+                    // stream id
+                    0x04, 0x03, 0x02, 0x01,
+                    // offset
+                    0x54, 0x76, 0x10, 0x32,
+                    0xDC, 0xFE, 0x98, 0xBA,
+                    // data length
+                    0x0c, 0x00,
+                    // data
+                    b'h',  b'e',  b'l',  b'l',
+                    b'o',  b' ',  b'w',  b'o',
+                    b'r',  b'l',  b'd',  b'!',
+                ]
+            )
         ];
 
-        let padding_frame = QuicPaddingFrame {
-            num_padding_bytes: 29,
-        };
+        let header = QuicPacketHeader::default();
 
-        assert_eq!(padding_frame.frame_size(), bytes.len());
-        assert_eq!(
-            QuicPaddingFrame::parse(QuicVersion::QUIC_VERSION_35, bytes).unwrap(),
-            (padding_frame, &[][..])
-        );
+        for &(quic_version, num_padding_bytes, payload) in test_cases {
+            let padding_frame = QuicPaddingFrame { num_padding_bytes };
 
-        let padding_frame = QuicPaddingFrame {
-            num_padding_bytes: 2,
-        };
+            assert_eq!(
+                padding_frame.frame_size(quic_version, &header),
+                1 + num_padding_bytes as usize
+            );
+            assert_eq!(
+                QuicPaddingFrame::parse(quic_version, &header, payload)
+                    .unwrap()
+                    .0,
+                padding_frame
+            );
 
-        assert_eq!(padding_frame.frame_size(), 3);
-        assert_eq!(
-            QuicPaddingFrame::parse(QuicVersion::QUIC_VERSION_37, bytes).unwrap(),
-            (padding_frame, &bytes[3..])
-        );
+            let mut buf = Vec::with_capacity(payload.len());
+
+            assert_eq!(
+                padding_frame
+                    .write_frame(quic_version, &header, &mut buf)
+                    .unwrap(),
+                buf.len()
+            );
+            assert!(buf.into_iter().all(|b| b == 0));
+        }
     }
 }

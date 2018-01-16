@@ -4,12 +4,10 @@ use failure::{Error, Fail};
 use nom::{self, IResult, Needed, be_u8};
 use time::Duration;
 
+use constants::kQuicFrameTypeSize;
 use errors::ParseError::*;
 use errors::QuicError::{self, IncompletePacket};
-use frames::kQuicFrameTypeSize;
-use packet::{read_ack_packet_number_length, PACKET_1BYTE_PACKET_NUMBER, PACKET_2BYTE_PACKET_NUMBER,
-             PACKET_4BYTE_PACKET_NUMBER, PACKET_6BYTE_PACKET_NUMBER, PACKET_8BYTE_PACKET_NUMBER,
-             QuicPacketNumberLength};
+use packet::{packet_number_size, read_ack_packet_number_length, QuicPacketNumberLength};
 use types::{QuicPacketNumber, QuicTime, QuicTimeDelta, QuicVersion, ToQuicTimeDelta, UFloat16, ufloat16};
 
 // packet number size shift used in AckFrames.
@@ -217,21 +215,6 @@ named_args!(parse_quic_ack_frame(quic_version: QuicVersion,
         )
     )
 );
-
-fn packet_number_size(quic_version: QuicVersion, packet_number: QuicPacketNumber) -> usize {
-    [
-        PACKET_1BYTE_PACKET_NUMBER,
-        PACKET_2BYTE_PACKET_NUMBER,
-        PACKET_4BYTE_PACKET_NUMBER,
-    ].into_iter()
-        .cloned()
-        .find(|&n| packet_number < 1 << 8 * n as usize)
-        .unwrap_or(if quic_version <= QuicVersion::QUIC_VERSION_39 {
-            PACKET_6BYTE_PACKET_NUMBER
-        } else {
-            PACKET_8BYTE_PACKET_NUMBER
-        }) as usize
-}
 
 /// A sequence of packet numbers where each number is unique.
 ///

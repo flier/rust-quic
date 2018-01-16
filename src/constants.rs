@@ -43,3 +43,6 @@ pub const kQuicFrameTypeStreamMask_Pre40: u8 = 0x80;
 pub const kQuicFrameTypeStreamMask: u8 = 0xC0;
 pub const kQuicFrameTypeAckMask_Pre40: u8 = 0x40;
 pub const kQuicFrameTypeAckMask: u8 = 0xA0;
+
+pub const kQuicFrameTypeSize: usize = 1; // u8
+pub const kStringPieceLenSize: usize = 2; // u16

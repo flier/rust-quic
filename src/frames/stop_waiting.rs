@@ -1,10 +1,11 @@
-use std::mem;
-
-use failure::{Error, Fail};
+use byteorder::ByteOrder;
+use bytes::BufMut;
+use failure::Error;
 use nom::IResult;
 
+use constants::kQuicFrameTypeSize;
 use errors::QuicError;
-use frames::kQuicFrameTypeSize;
+use frames::{FromWire, ToWire};
 use packet::{QuicPacketHeader, QuicPacketNumberLength};
 use types::{QuicFrameType, QuicPacketNumber, QuicVersion};
 
@@ -18,12 +19,16 @@ pub struct QuicStopWaitingFrame {
     least_unacked: QuicPacketNumber,
 }
 
-impl QuicStopWaitingFrame {
-    pub fn parse<'p>(
+
+impl<'a> FromWire<'a> for QuicStopWaitingFrame {
+    type Frame = QuicStopWaitingFrame;
+    type Error = Error;
+
+    fn parse(
         quic_version: QuicVersion,
         header: &QuicPacketHeader,
-        payload: &'p [u8],
-    ) -> Result<(QuicStopWaitingFrame, &'p [u8]), Error> {
+        payload: &'a [u8],
+    ) -> Result<(Self::Frame, &'a [u8]), Self::Error> {
         match parse_quic_blocked_frame(
             payload,
             quic_version,
@@ -31,15 +36,48 @@ impl QuicStopWaitingFrame {
             header.packet_number,
         ) {
             IResult::Done(remaining, frame) => Ok((frame, remaining)),
-            IResult::Incomplete(needed) => {
-                bail!(QuicError::IncompletePacket(needed).context("incomplete stop waiting frame."))
-            }
-            IResult::Error(err) => bail!(QuicError::from(err).context("unable to process stop waiting frame.")),
+            IResult::Incomplete(needed) => bail!(QuicError::IncompletePacket(needed)),
+            IResult::Error(err) => bail!(QuicError::from(err)),
         }
     }
+}
 
-    pub fn frame_size(&self) -> usize {
-        kQuicFrameTypeSize + mem::size_of::<QuicPacketNumber>()
+impl ToWire for QuicStopWaitingFrame {
+    type Frame = QuicStopWaitingFrame;
+    type Error = Error;
+
+    fn frame_size(&self, _quic_version: QuicVersion, header: &QuicPacketHeader) -> usize {
+        // Frame Type
+        kQuicFrameTypeSize +
+        // Least Unacked Delta
+        header.public_header.packet_number_length as usize
+    }
+
+    fn write_to<E, T>(
+        &self,
+        quic_version: QuicVersion,
+        header: &QuicPacketHeader,
+        buf: &mut T,
+    ) -> Result<usize, Self::Error>
+    where
+        E: ByteOrder,
+        T: BufMut,
+    {
+        let frame_size = self.frame_size(quic_version, header);
+
+        if buf.remaining_mut() < frame_size {
+            bail!(QuicError::NotEnoughBuffer(frame_size))
+        }
+
+        // Frame Type
+        buf.put_u8(QuicFrameType::StopWaiting as u8);
+        // Least Unacked Delta
+        buf.put_uint::<E>(
+            header.packet_number - self.least_unacked,
+            header.public_header.packet_number_length as usize,
+        );
+
+        Ok(frame_size)
     }
 }
 
@@ -71,7 +109,7 @@ mod tests {
     const kLeastUnacked: QuicPacketNumber = 0x0123456789AA0;
 
     #[test]
-    fn parse_stop_waiting_frame() {
+    fn stop_waiting_frame() {
         #[cfg_attr(rustfmt, rustfmt_skip)]
         const test_cases: &[(QuicVersion, &[u8])] = &[
             (
@@ -108,14 +146,27 @@ mod tests {
             least_unacked: kLeastUnacked,
         };
 
-        for &(quic_version, bytes) in test_cases {
-            assert_eq!(stop_waiting_frame.frame_size(), bytes.len() + 2); // 8 bytes packet number
+        for &(quic_version, payload) in test_cases {
             assert_eq!(
-                QuicStopWaitingFrame::parse(quic_version, &header, bytes).unwrap(),
+                stop_waiting_frame.frame_size(quic_version, &header),
+                payload.len()
+            );
+            assert_eq!(
+                QuicStopWaitingFrame::parse(quic_version, &header, payload).unwrap(),
                 (stop_waiting_frame.clone(), &[][..]),
                 "parse blocked frame, version {:?}",
                 quic_version,
             );
+
+            let mut buf = Vec::with_capacity(payload.len());
+
+            assert_eq!(
+                stop_waiting_frame
+                    .write_frame(quic_version, &header, &mut buf)
+                    .unwrap(),
+                buf.len()
+            );
+            assert_eq!(&buf, &payload);
         }
     }
 }

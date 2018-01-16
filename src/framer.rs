@@ -13,7 +13,7 @@ use constants::kMaxPacketSize;
 use crypto::{CryptoHandshakeMessage, NullDecrypter, QuicDecrypter, kCADR, kPRST, kRNON};
 use errors::QuicError;
 use errors::QuicError::*;
-use frames::{QuicAckFrame, QuicBlockedFrame, QuicPingFrame, kQuicFrameTypeSize,
+use frames::{QuicAckFrame, QuicBlockedFrame, QuicPingFrame, FromWire,
              QuicConnectionCloseFrame, QuicGoAwayFrame, QuicPaddingFrame, QuicRstStreamFrame, QuicStopWaitingFrame,
              QuicStreamFrame, QuicWindowUpdateFrame};
 use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketPublicHeader, QuicPublicResetPacket,
@@ -450,7 +450,7 @@ where
         while let Some(&frame_type) = payload.first() {
             match QuicFrameType::with_version(self.quic_version, frame_type)? {
                 QuicFrameType::Padding => {
-                    let (frame, remaining) = QuicPaddingFrame::parse(self.quic_version, payload)?;
+                    let (frame, remaining) = QuicPaddingFrame::parse(self.quic_version, header, payload)?;
 
                     debug!("parsed frame: {:?}", frame);
 
@@ -463,7 +463,7 @@ where
                     payload = remaining;
                 }
                 QuicFrameType::ResetStream => {
-                    let (frame, remaining) = QuicRstStreamFrame::parse(self.quic_version, payload)?;
+                    let (frame, remaining) = QuicRstStreamFrame::parse(self.quic_version, header, payload)?;
 
                     debug!("parsed frame: {:?}", frame);
 
@@ -476,7 +476,7 @@ where
                     payload = remaining;
                 }
                 QuicFrameType::ConnectionClose => {
-                    let (frame, remaining) = QuicConnectionCloseFrame::parse(self.quic_version, payload)?;
+                    let (frame, remaining) = QuicConnectionCloseFrame::parse(self.quic_version, header, payload)?;
 
                     debug!("parsed frame: {:?}", frame);
 
@@ -489,7 +489,7 @@ where
                     payload = remaining;
                 }
                 QuicFrameType::GoAway => {
-                    let (frame, remaining) = QuicGoAwayFrame::parse(self.quic_version, payload)?;
+                    let (frame, remaining) = QuicGoAwayFrame::parse(self.quic_version, header, payload)?;
 
                     debug!("parsed frame: {:?}", frame);
 
@@ -502,7 +502,7 @@ where
                     payload = remaining;
                 }
                 QuicFrameType::WindowUpdate => {
-                    let (frame, remaining) = QuicWindowUpdateFrame::parse(self.quic_version, payload)?;
+                    let (frame, remaining) = QuicWindowUpdateFrame::parse(self.quic_version, header, payload)?;
 
                     debug!("parsed frame: {:?}", frame);
 
@@ -515,7 +515,7 @@ where
                     payload = remaining;
                 }
                 QuicFrameType::Blocked => {
-                    let (frame, remaining) = QuicBlockedFrame::parse(self.quic_version, payload)?;
+                    let (frame, remaining) = QuicBlockedFrame::parse(self.quic_version, header, payload)?;
 
                     debug!("parsed frame: {:?}", frame);
 
@@ -545,7 +545,11 @@ where
                     payload = remaining;
                 }
                 QuicFrameType::Ping => {
-                    let frame = QuicPingFrame{};
+                    let (frame, remaining) = QuicPingFrame::parse(
+                        self.quic_version,
+                        header,
+                        payload,
+                    )?;
 
                     debug!("parsed frame: {:?}", frame);
 
@@ -555,10 +559,10 @@ where
                         return Ok(());
                     }
 
-                    payload = &payload[kQuicFrameTypeSize..];
+                    payload = remaining;
                 }
                 QuicFrameType::Stream => {
-                    let (frame, remaining) = QuicStreamFrame::parse(self.quic_version, payload)?;
+                    let (frame, remaining) = QuicStreamFrame::parse(self.quic_version, header, payload)?;
 
                     debug!("parsed frame: {:?}", frame);
 

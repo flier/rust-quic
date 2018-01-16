@@ -6,15 +6,33 @@ use types::QuicFrameType;
 
 #[macro_export]
 macro_rules! extract_bits {
-    ($flags:expr, $bits:expr, $offset:expr) => {
-        ($flags >> $offset) & ((1 << $bits) - 1)
+    ($flags:expr, $bits:expr, $shift:expr) => {
+        ($flags >> $shift) & ((1 << $bits) - 1)
     };
 }
 
 #[macro_export]
 macro_rules! extract_bool {
-    ($flags:expr, $offset:expr) => {
-        0 != extract_bits!($flags, 1, $offset)
+    ($flags:expr, $shift:expr) => {
+        0 != extract_bits!($flags, 1, $shift)
+    };
+}
+
+#[macro_export]
+macro_rules! set_bits {
+    ($flags:expr, $bits:expr, $shift:expr) => {
+        $flags |= ($bits) << ($shift)
+    };
+}
+
+#[macro_export]
+macro_rules! set_bool {
+    ($flags:expr, $bit:expr, $shift:expr) => {
+        if $bit {
+            $flags |= 1 << ($shift)
+        } else {
+            $flags ^= 1 << ($shift)
+        }
     };
 }
 

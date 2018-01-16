@@ -1,3 +1,4 @@
+#![cfg_attr(feature = "nightly", feature(trace_macros))]
 #![cfg_attr(feature = "clippy", feature(plugin))]
 #![cfg_attr(feature = "clippy", plugin(clippy(conf_file = "../clippy.toml")))]
 

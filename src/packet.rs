@@ -23,10 +23,10 @@ const kDiversificationNonceSize: usize = 32;
 
 pub type QuicPacketNumberLengthFlags = u8;
 
-pub const PACKET_FLAGS_1BYTE_PACKET: QuicPacketNumberLengthFlags = 0; // 00
-pub const PACKET_FLAGS_2BYTE_PACKET: QuicPacketNumberLengthFlags = 1; // 01
-pub const PACKET_FLAGS_4BYTE_PACKET: QuicPacketNumberLengthFlags = 1 << 1; // 10
-pub const PACKET_FLAGS_8BYTE_PACKET: QuicPacketNumberLengthFlags = 1 << 1 | 1; // 11
+const PACKET_FLAGS_1BYTE_PACKET: QuicPacketNumberLengthFlags = 0; // 00
+const PACKET_FLAGS_2BYTE_PACKET: QuicPacketNumberLengthFlags = 1; // 01
+const PACKET_FLAGS_4BYTE_PACKET: QuicPacketNumberLengthFlags = 1 << 1; // 10
+const PACKET_FLAGS_8BYTE_PACKET: QuicPacketNumberLengthFlags = 1 << 1 | 1; // 11
 
 pub type QuicPacketNumberLength = u8;
 
@@ -52,6 +52,21 @@ pub fn read_ack_packet_number_length(
         PACKET_FLAGS_1BYTE_PACKET => PACKET_1BYTE_PACKET_NUMBER,
         _ => PACKET_6BYTE_PACKET_NUMBER,
     }
+}
+
+pub fn packet_number_size(quic_version: QuicVersion, packet_number: QuicPacketNumber) -> usize {
+    [
+        PACKET_1BYTE_PACKET_NUMBER,
+        PACKET_2BYTE_PACKET_NUMBER,
+        PACKET_4BYTE_PACKET_NUMBER,
+    ].into_iter()
+        .cloned()
+        .find(|&n| packet_number < (1 << (8 * n as usize)))
+        .unwrap_or(if quic_version <= QuicVersion::QUIC_VERSION_39 {
+            PACKET_6BYTE_PACKET_NUMBER
+        } else {
+            PACKET_8BYTE_PACKET_NUMBER
+        }) as usize
 }
 
 /// Number of bits the packet number length bits are shifted from the right edge of the public header.
@@ -137,6 +152,7 @@ impl<'a> QuicPacketPublicHeader<'a> {
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct QuicPacketHeader<'a> {
     pub public_header: QuicPacketPublicHeader<'a>,
     pub packet_number: QuicPacketNumber,

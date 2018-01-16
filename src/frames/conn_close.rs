@@ -1,10 +1,14 @@
 use std::mem;
 
-use failure::{Error, Fail};
+use byteorder::ByteOrder;
+use bytes::BufMut;
+use failure::Error;
 use nom::IResult;
 
+use constants::{kQuicFrameTypeSize, kStringPieceLenSize};
 use errors::{QuicError, QuicErrorCode};
-use frames::{kQuicFrameTypeSize, kStringPieceLenSize};
+use frames::{BufMutExt, FromWire, ToWire};
+use packet::QuicPacketHeader;
 use types::{QuicFrameType, QuicVersion};
 
 /// The `CONNECTION_CLOSE` frame allows for notification that the connection is being closed.
@@ -19,28 +23,70 @@ pub struct QuicConnectionCloseFrame<'a> {
     pub error_details: Option<&'a str>,
 }
 
-impl<'a> QuicConnectionCloseFrame<'a> {
-    pub fn parse(
+impl<'a> FromWire<'a> for QuicConnectionCloseFrame<'a> {
+    type Frame = QuicConnectionCloseFrame<'a>;
+    type Error = Error;
+
+    fn parse(
         quic_version: QuicVersion,
+        _header: &QuicPacketHeader,
         payload: &'a [u8],
-    ) -> Result<(QuicConnectionCloseFrame<'a>, &'a [u8]), Error> {
+    ) -> Result<(QuicConnectionCloseFrame<'a>, &'a [u8]), Self::Error> {
         match parse_quic_connection_close_frame(payload, quic_version) {
             IResult::Done(remaining, frame) => Ok((frame, remaining)),
-            IResult::Incomplete(needed) => {
-                bail!(QuicError::IncompletePacket(needed).context("incomplete connection close frame."))
-            }
-            IResult::Error(err) => bail!(QuicError::from(err).context("unable to process connection close frame.")),
+            IResult::Incomplete(needed) => bail!(QuicError::IncompletePacket(needed)),
+            IResult::Error(err) => bail!(QuicError::from(err)),
         }
-    }
-
-    pub fn frame_size(&self) -> usize {
-        kQuicFrameTypeSize + mem::size_of::<QuicErrorCode>() + kStringPieceLenSize
-            + self.error_details.map(|s| s.len()).unwrap_or_default()
     }
 }
 
-named_args!(
-    parse_quic_connection_close_frame(quic_version: QuicVersion)<QuicConnectionCloseFrame>, do_parse!(
+
+impl<'a> ToWire for QuicConnectionCloseFrame<'a> {
+    type Frame = QuicConnectionCloseFrame<'a>;
+    type Error = Error;
+
+    fn frame_size(&self, _quic_version: QuicVersion, _header: &QuicPacketHeader) -> usize {
+        // Frame Type
+        kQuicFrameTypeSize +
+        // Error Code
+        mem::size_of::<QuicErrorCode>() +
+        // Reason Phrase
+        kStringPieceLenSize + self.error_details.map(|s| s.len()).unwrap_or_default()
+    }
+
+    fn write_to<E, T>(
+        &self,
+        quic_version: QuicVersion,
+        header: &QuicPacketHeader,
+        buf: &mut T,
+    ) -> Result<usize, Self::Error>
+    where
+        E: ByteOrder,
+        T: BufMut,
+    {
+        let frame_size = self.frame_size(quic_version, header);
+
+        if buf.remaining_mut() < frame_size {
+            bail!(QuicError::NotEnoughBuffer(frame_size))
+        }
+
+        // Frame Type
+        buf.put_u8(QuicFrameType::ConnectionClose as u8);
+        // Error Code
+        buf.put_u32::<E>(self.error_code as u32);
+        // Reason Phrase
+        buf.put_string_piece16::<E>(self.error_details);
+
+        Ok(frame_size)
+    }
+}
+
+fn parse_quic_connection_close_frame(
+    input: &[u8],
+    quic_version: QuicVersion,
+) -> IResult<&[u8], QuicConnectionCloseFrame> {
+    do_parse!(
+        input,
         _frame_type: frame_type!(QuicFrameType::ConnectionClose) >>
         error_code: error_code!(quic_version.endianness()) >>
         error_details: string_piece16!(quic_version.endianness()) >>
@@ -51,14 +97,14 @@ named_args!(
             }
         )
     )
-);
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn parse_connection_close_frame() {
+    fn connection_close_frame() {
         #[cfg_attr(rustfmt, rustfmt_skip)]
         const test_cases: &[(QuicVersion, &[u8])] = &[
             (
@@ -95,19 +141,33 @@ mod tests {
             ),
         ];
 
+        let header = QuicPacketHeader::default();
         let connection_close_frame = QuicConnectionCloseFrame {
             error_code: QuicErrorCode::QUIC_INVALID_STREAM_ID,
             error_details: Some("because I can"),
         };
 
-        for &(quic_version, bytes) in test_cases {
-            assert_eq!(connection_close_frame.frame_size(), bytes.len());
+        for &(quic_version, payload) in test_cases {
             assert_eq!(
-                QuicConnectionCloseFrame::parse(quic_version, bytes).unwrap(),
+                connection_close_frame.frame_size(quic_version, &header),
+                payload.len()
+            );
+            assert_eq!(
+                QuicConnectionCloseFrame::parse(quic_version, &header, payload).unwrap(),
                 (connection_close_frame.clone(), &[][..]),
                 "parse connection close frame, version {:?}",
                 quic_version,
             );
+
+            let mut buf = Vec::with_capacity(payload.len());
+
+            assert_eq!(
+                connection_close_frame
+                    .write_frame(quic_version, &header, &mut buf)
+                    .unwrap(),
+                buf.len()
+            );
+            assert_eq!(&buf, &payload);
         }
     }
 }

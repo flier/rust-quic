@@ -1,22 +1,24 @@
 #![allow(non_upper_case_globals)]
 
-use std::borrow::Cow;
 use std::mem;
 
+use byteorder::ByteOrder;
+use bytes::BufMut;
 use failure::{Error, Fail};
 use nom::{self, IResult, Needed};
 
-use constants::{kQuicFrameTypeStreamMask, kQuicFrameTypeStreamMask_Pre40};
+use constants::{kQuicFrameTypeSize, kQuicFrameTypeStreamMask, kQuicFrameTypeStreamMask_Pre40};
 use errors::QuicError::{self, IncompletePacket};
-use frames::kQuicFrameTypeSize;
-use types::{QuicStreamId, QuicStreamOffset, QuicVersion};
+use frames::{FromWire, ToWire};
+use packet::QuicPacketHeader;
+use types::{QuicFrameType, QuicStreamId, QuicStreamOffset, QuicVersion};
 
 // Stream type format is 11FSSOOD.
 // Stream frame relative shifts and masks for interpreting the stream flags.
 // StreamID may be 1, 2, 3, or 4 bytes.
 const kQuicStreamIdLengthShift_Pre40: usize = 0;
 const kQuicStreamIDLengthNumBits_Pre40: usize = 2;
-const kQuicStreamIDLengthShift: usize = 3;
+const kQuicStreamIdLengthShift: usize = 3;
 const kQuicStreamIDLengthNumBits: usize = 2;
 
 // Offset may be 0, 2, 4, or 8 bytes.
@@ -46,11 +48,18 @@ pub struct QuicStreamFrame<'a> {
     ///
     /// The option to omit the length should only be used when the packet is a "full-sized" Packet,
     /// to avoid the risk of corruption via padding.
-    pub data: Option<Cow<'a, [u8]>>,
+    pub data: Option<&'a [u8]>,
 }
 
-impl<'a> QuicStreamFrame<'a> {
-    pub fn parse(quic_version: QuicVersion, payload: &'a [u8]) -> Result<(QuicStreamFrame<'a>, &'a [u8]), Error> {
+impl<'a> FromWire<'a> for QuicStreamFrame<'a> {
+    type Frame = QuicStreamFrame<'a>;
+    type Error = Error;
+
+    fn parse(
+        quic_version: QuicVersion,
+        _header: &QuicPacketHeader,
+        payload: &'a [u8],
+    ) -> Result<(Self::Frame, &'a [u8]), Self::Error> {
         if let Some((&frame_type, remaining)) = payload.split_first() {
             let (stream_id_length, offset_length, has_data_length, fin) = if quic_version < QuicVersion::QUIC_VERSION_40
             {
@@ -76,7 +85,7 @@ impl<'a> QuicStreamFrame<'a> {
             } else {
                 let flags = frame_type & !kQuicFrameTypeStreamMask;
                 (
-                    1 + extract_bits!(flags, kQuicStreamIDLengthNumBits, kQuicStreamIDLengthShift) as usize,
+                    1 + extract_bits!(flags, kQuicStreamIDLengthNumBits, kQuicStreamIdLengthShift) as usize,
                     match 1 << extract_bits!(flags, kQuicStreamOffsetNumBits, kQuicStreamOffsetShift) {
                         1 => 0,
                         n => n,
@@ -100,9 +109,9 @@ impl<'a> QuicStreamFrame<'a> {
                                 bail!(IncompletePacket(nom::Needed::Size(len)).context("incomplete data frame."))
                             }
 
-                            (Some(remaining[..len].into()), &remaining[len..])
+                            (Some(&remaining[..len]), &remaining[len..])
                         }
-                        None if !remaining.is_empty() => (Some(remaining.into()), &b""[..]),
+                        None if !remaining.is_empty() => (Some(remaining), &b""[..]),
                         _ => (None, remaining),
                     };
 
@@ -123,18 +132,82 @@ impl<'a> QuicStreamFrame<'a> {
             bail!(IncompletePacket(Needed::Size(1)).context("incomplete data frame."))
         }
     }
+}
 
-    pub fn frame_size(&self, quic_verion: QuicVersion) -> usize {
+
+impl<'a> ToWire for QuicStreamFrame<'a> {
+    type Frame = QuicStreamFrame<'a>;
+    type Error = Error;
+
+    fn frame_size(&self, quic_version: QuicVersion, _header: &QuicPacketHeader) -> usize {
         // Frame Type
         kQuicFrameTypeSize +
         // Stream ID
         stream_id_size(self.stream_id) +
         // Offset
-        stream_offset_size(quic_verion, self.offset) +
+        stream_offset_size(quic_version, self.offset) +
         // Data
         self.data
             .as_ref()
             .map_or(0, |data| mem::size_of::<u16>() + data.len())
+    }
+
+    fn write_to<E, T>(
+        &self,
+        quic_version: QuicVersion,
+        header: &QuicPacketHeader,
+        buf: &mut T,
+    ) -> Result<usize, Self::Error>
+    where
+        E: ByteOrder,
+        T: BufMut,
+    {
+        let frame_size = self.frame_size(quic_version, header);
+
+        if buf.remaining_mut() < frame_size {
+            bail!(QuicError::NotEnoughBuffer(frame_size))
+        }
+
+        let stream_id_size = stream_id_size(self.stream_id);
+        let stream_offset_size = stream_offset_size(quic_version, self.offset);
+        let mut flags = QuicFrameType::Stream as u8;
+
+        if quic_version < QuicVersion::QUIC_VERSION_40 {
+            set_bits!(flags, stream_id_size as u8 - 1, kQuicStreamIdLengthShift_Pre40);
+            set_bits!(flags, if stream_offset_size == 0 { 0 } else { stream_offset_size as u8 - 1 }, kQuicStreamOffsetShift_Pre40);
+            set_bool!(flags, self.data.map_or(false, |v| !v.is_empty()), kQuicStreamDataLengthShift_Pre40);
+            set_bool!(flags, self.fin, kQuicStreamFinShift_Pre40);
+        } else {
+            set_bits!(flags, stream_id_size as u8 - 1, kQuicStreamIdLengthShift);
+            set_bits!(flags, stream_offset_size.next_power_of_two() as u8 - 1, kQuicStreamOffsetShift);
+            set_bool!(flags, self.data.map_or(false, |v| !v.is_empty()), kQuicStreamDataLengthShift);
+            set_bool!(flags, self.fin, kQuicStreamFinShift);
+        }
+
+        // Frame Type
+        buf.put_u8(flags);
+        // Data length
+        if quic_version > QuicVersion::QUIC_VERSION_39 {
+            if let Some(data) = self.data {
+                buf.put_u16::<E>(data.len() as u16);
+            }
+        }
+        // Stream ID
+        buf.put_uint::<E>(u64::from(self.stream_id), stream_id_size);
+        // Offset
+        buf.put_uint::<E>(self.offset, stream_offset_size);
+        // Data length
+        if quic_version <= QuicVersion::QUIC_VERSION_39 {
+            if let Some(data) = self.data {
+                buf.put_u16::<E>(data.len() as u16);
+            }
+        }
+        // Data
+        if let Some(data) = self.data {
+            buf.put_slice(data);
+        }
+
+        Ok(frame_size)
     }
 }
 
@@ -162,7 +235,7 @@ named_args!(
 );
 
 fn stream_id_size(stream_id: QuicStreamId) -> usize {
-    (1..4).find(|n| stream_id >> 8 * n == 0).unwrap_or(4)
+    (1..4).find(|n| stream_id >> (8 * n) == 0).unwrap_or(4)
 }
 
 fn stream_offset_size(quic_verion: QuicVersion, stream_offset: QuicStreamOffset) -> usize {
@@ -170,12 +243,12 @@ fn stream_offset_size(quic_verion: QuicVersion, stream_offset: QuicStreamOffset)
         if stream_offset == 0 {
             0
         } else {
-            (2..8).find(|n| stream_offset >> 8 * n == 0).unwrap_or(8)
+            (2..8).find(|n| stream_offset >> (8 * n) == 0).unwrap_or(8)
         }
     } else {
         (0..3)
             .map(|n| n * 2)
-            .find(|n| stream_offset >> 8 * n == 0)
+            .find(|n| stream_offset >> (8 * n) == 0)
             .unwrap_or(8)
     }
 }
@@ -188,14 +261,14 @@ mod tests {
     const kStreamOffset: QuicStreamOffset = 0xBA98FEDC32107654;
 
     #[test]
-    fn parse_stream_frame() {
+    fn stream_frame() {
         #[cfg_attr(rustfmt, rustfmt_skip)]
         const test_cases: &[(QuicVersion, &[u8])] = &[
             (
                 QuicVersion::QUIC_VERSION_38,
                 &[
                     // frame type (stream frame with fin)
-                    0xFF,
+                    0b1111011,
                     // stream id
                     0x04, 0x03, 0x02, 0x01,
                     // offset
@@ -213,7 +286,7 @@ mod tests {
                 QuicVersion::QUIC_VERSION_39,
                 &[
                     // frame type (stream frame with fin)
-                    0xFF,
+                    0b1111011,
                     // stream id
                     0x01, 0x02, 0x03, 0x04,
                     // offset
@@ -231,7 +304,7 @@ mod tests {
                 QuicVersion::QUIC_VERSION_40,
                 &[
                     // frame type (stream frame with fin)
-                    0xFF,
+                    0b111111,
                     // data length
                     0x00, 0x0c,
                     // stream id
@@ -247,21 +320,35 @@ mod tests {
             ),
         ];
 
+        let header = QuicPacketHeader::default();
         let stream_frame = QuicStreamFrame {
             stream_id: kStreamId,
             offset: kStreamOffset,
             fin: true,
-            data: Some(Cow::from(&b"hello world!"[..])),
+            data: Some(&b"hello world!"[..]),
         };
 
-        for &(quic_version, bytes) in test_cases {
-            assert_eq!(stream_frame.frame_size(quic_version), bytes.len());
+        for &(quic_version, payload) in test_cases {
             assert_eq!(
-                QuicStreamFrame::parse(quic_version, bytes).unwrap(),
+                stream_frame.frame_size(quic_version, &header),
+                payload.len()
+            );
+            assert_eq!(
+                QuicStreamFrame::parse(quic_version, &header, payload).unwrap(),
                 (stream_frame.clone(), &[][..]),
                 "parse stream frame, version {:?}",
                 quic_version,
             );
+
+            let mut buf = Vec::with_capacity(payload.len());
+
+            assert_eq!(
+                stream_frame
+                    .write_frame(quic_version, &header, &mut buf)
+                    .unwrap(),
+                buf.len()
+            );
+            assert_eq!(&buf, &payload, "write stream frame {:?}, version {:?}", stream_frame, quic_version);
         }
     }
 }

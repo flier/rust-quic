@@ -31,7 +31,7 @@ pub enum QuicFrameType {
 impl QuicFrameType {
     pub fn with_version(quic_version: QuicVersion, flags: u8) -> Result<QuicFrameType, Error> {
         if is_regular_frame(flags) {
-            QuicFrameType::from_u8(flags & kQuicFrameTypeRegularMask).ok_or(QuicError::IllegalFrameType(flags).into())
+            QuicFrameType::from_u8(flags & kQuicFrameTypeRegularMask).ok_or_else(|| QuicError::IllegalFrameType(flags).into())
         } else if is_stream_frame(quic_version, flags) {
             Ok(QuicFrameType::Stream)
         } else if is_ack_frame(quic_version, flags) {

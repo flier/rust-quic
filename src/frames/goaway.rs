@@ -1,10 +1,14 @@
 use std::mem;
 
-use failure::{Error, Fail};
+use byteorder::ByteOrder;
+use bytes::BufMut;
+use failure::Error;
 use nom::IResult;
 
+use constants::{kQuicFrameTypeSize, kStringPieceLenSize};
 use errors::{QuicError, QuicErrorCode};
-use frames::{kQuicFrameTypeSize, kStringPieceLenSize};
+use frames::{BufMutExt, FromWire, ToWire};
+use packet::QuicPacketHeader;
 use types::{QuicFrameType, QuicStreamId, QuicVersion};
 
 /// The GOAWAY frame allows for notification that the connection should stop being used,
@@ -20,20 +24,64 @@ pub struct QuicGoAwayFrame<'a> {
     reason_phrase: Option<&'a str>,
 }
 
-impl<'a> QuicGoAwayFrame<'a> {
-    pub fn parse(quic_version: QuicVersion, payload: &'a [u8]) -> Result<(QuicGoAwayFrame<'a>, &'a [u8]), Error> {
+impl<'a> FromWire<'a> for QuicGoAwayFrame<'a> {
+    type Frame = QuicGoAwayFrame<'a>;
+    type Error = Error;
+
+    fn parse(
+        quic_version: QuicVersion,
+        _header: &QuicPacketHeader,
+        payload: &'a [u8],
+    ) -> Result<(Self::Frame, &'a [u8]), Self::Error> {
         match parse_quic_go_away_frame(payload, quic_version) {
             IResult::Done(remaining, frame) => Ok((frame, remaining)),
-            IResult::Incomplete(needed) => {
-                bail!(QuicError::IncompletePacket(needed).context("incomplete go away frame."))
-            }
-            IResult::Error(err) => bail!(QuicError::from(err).context("unable to process go away frame.")),
+            IResult::Incomplete(needed) => bail!(QuicError::IncompletePacket(needed)),
+            IResult::Error(err) => bail!(QuicError::from(err)),
         }
     }
+}
 
-    pub fn frame_size(&self) -> usize {
-        kQuicFrameTypeSize + mem::size_of::<QuicErrorCode>() + mem::size_of::<QuicStreamId>() + kStringPieceLenSize
-            + self.reason_phrase.map(|s| s.len()).unwrap_or_default()
+impl<'a> ToWire for QuicGoAwayFrame<'a> {
+    type Frame = QuicGoAwayFrame<'a>;
+    type Error = Error;
+
+    fn frame_size(&self, _quic_version: QuicVersion, _header: &QuicPacketHeader) -> usize {
+        // Frame Type
+        kQuicFrameTypeSize +
+        // Error Code
+        mem::size_of::<QuicErrorCode>() +
+        // Last Good Stream ID
+        mem::size_of::<QuicStreamId>() +
+        // Reason Phrase
+        kStringPieceLenSize + self.reason_phrase.map(|s| s.len()).unwrap_or_default()
+    }
+
+    fn write_to<E, T>(
+        &self,
+        quic_version: QuicVersion,
+        header: &QuicPacketHeader,
+        buf: &mut T,
+    ) -> Result<usize, Self::Error>
+    where
+        E: ByteOrder,
+        T: BufMut,
+    {
+        let frame_size = self.frame_size(quic_version, header);
+
+        if buf.remaining_mut() < frame_size {
+            bail!(QuicError::NotEnoughBuffer(frame_size))
+        }
+
+        // Frame Type
+        buf.put_u8(QuicFrameType::GoAway as u8);
+        // Error Code
+        buf.put_u32::<E>(self.error_code as u32);
+        // Last Good Stream ID
+        buf.put_u32::<E>(self.last_good_stream_id.unwrap_or_default());
+        // Reason Phrase
+        buf.put_string_piece16::<E>(self.reason_phrase);
+
+        Ok(frame_size)
     }
 }
 
@@ -58,7 +106,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_go_away_frame() {
+    fn go_away_frame() {
         #[cfg_attr(rustfmt, rustfmt_skip)]
         const test_cases: &[(QuicVersion, &[u8])] = &[
             (
@@ -99,20 +147,34 @@ mod tests {
             ),
         ];
 
+        let header = QuicPacketHeader::default();
         let go_away_frame = QuicGoAwayFrame {
             error_code: QuicErrorCode::QUIC_INVALID_ACK_DATA,
             last_good_stream_id: Some(0x01020304),
             reason_phrase: Some("because I can"),
         };
 
-        for &(quic_version, bytes) in test_cases {
-            assert_eq!(go_away_frame.frame_size(), bytes.len());
+        for &(quic_version, payload) in test_cases {
             assert_eq!(
-                QuicGoAwayFrame::parse(quic_version, bytes).unwrap(),
+                go_away_frame.frame_size(quic_version, &header),
+                payload.len()
+            );
+            assert_eq!(
+                QuicGoAwayFrame::parse(quic_version, &header, payload).unwrap(),
                 (go_away_frame.clone(), &[][..]),
                 "parse go away stream frame, version {:?}",
                 quic_version,
             );
+
+            let mut buf = Vec::with_capacity(payload.len());
+
+            assert_eq!(
+                go_away_frame
+                    .write_frame(quic_version, &header, &mut buf)
+                    .unwrap(),
+                buf.len()
+            );
+            assert_eq!(&buf, &payload);
         }
     }
 }

@@ -28,6 +28,8 @@ pub enum QuicError {
 
     #[fail(display = "illegal frame type, {}", _0)] IllegalFrameType(u8),
 
+    #[fail(display = "not enough buffer, {}", _0)] NotEnoughBuffer(usize),
+
     #[fail(display = "nonce length mismatch, {}", _0)] NonceLenMismatch(usize),
 
     #[fail(display = "duplicate tag, {}", _0)] DuplicateTag(QuicTag),

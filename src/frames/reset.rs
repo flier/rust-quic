@@ -1,11 +1,15 @@
 use std::mem;
 
-use failure::{Error, Fail};
+use byteorder::ByteOrder;
+use bytes::BufMut;
+use failure::Error;
 use nom::IResult;
 use num::FromPrimitive;
 
+use constants::kQuicFrameTypeSize;
 use errors::{QuicError, QuicRstStreamErrorCode};
-use frames::kQuicFrameTypeSize;
+use frames::{FromWire, ToWire};
+use packet::QuicPacketHeader;
 use types::{QuicFrameType, QuicStreamId, QuicStreamOffset, QuicVersion};
 
 /// The `RST_STREAM` frame allows for abnormal termination of a stream.
@@ -23,20 +27,73 @@ pub struct QuicRstStreamFrame {
     pub byte_offset: QuicStreamOffset,
 }
 
-impl QuicRstStreamFrame {
-    pub fn parse(quic_version: QuicVersion, payload: &[u8]) -> Result<(QuicRstStreamFrame, &[u8]), Error> {
+impl<'a> FromWire<'a> for QuicRstStreamFrame {
+    type Frame = QuicRstStreamFrame;
+    type Error = Error;
+
+    fn parse(
+        quic_version: QuicVersion,
+        _header: &QuicPacketHeader,
+        payload: &'a [u8],
+    ) -> Result<(Self::Frame, &'a [u8]), Self::Error> {
         match parse_quic_reset_stream_frame(payload, quic_version) {
             IResult::Done(remaining, frame) => Ok((frame, remaining)),
-            IResult::Incomplete(needed) => {
-                bail!(QuicError::IncompletePacket(needed).context("incomplete reset frame."))
-            }
-            IResult::Error(err) => bail!(QuicError::from(err).context("unable to process reset frame.")),
+            IResult::Incomplete(needed) => bail!(QuicError::IncompletePacket(needed)),
+            IResult::Error(err) => bail!(QuicError::from(err)),
         }
     }
+}
 
-    pub fn frame_size(&self) -> usize {
-        kQuicFrameTypeSize + mem::size_of::<QuicStreamId>() + mem::size_of::<QuicRstStreamErrorCode>()
-            + mem::size_of::<QuicStreamOffset>()
+impl ToWire for QuicRstStreamFrame {
+    type Frame = QuicRstStreamFrame;
+    type Error = Error;
+
+    fn frame_size(&self, _quic_version: QuicVersion, _header: &QuicPacketHeader) -> usize {
+        // Frame type
+        kQuicFrameTypeSize +
+        // Stream ID
+        mem::size_of::<QuicStreamId>() +
+        // Error code
+        mem::size_of::<QuicRstStreamErrorCode>()+
+        // Byte offset
+        mem::size_of::<QuicStreamOffset>()
+    }
+
+    fn write_to<E, T>(
+        &self,
+        quic_version: QuicVersion,
+        header: &QuicPacketHeader,
+        buf: &mut T,
+    ) -> Result<usize, Self::Error>
+    where
+        E: ByteOrder,
+        T: BufMut,
+    {
+        let frame_size = self.frame_size(quic_version, header);
+
+        if buf.remaining_mut() < frame_size {
+            bail!(QuicError::NotEnoughBuffer(frame_size))
+        }
+
+        // Frame Type
+        buf.put_u8(QuicFrameType::ResetStream as u8);
+        // Stream ID
+        buf.put_u32::<E>(self.stream_id);
+
+        if quic_version <= QuicVersion::QUIC_VERSION_39 {
+            // Byte offset
+            buf.put_u64::<E>(self.byte_offset);
+        }
+
+        // Error code
+        buf.put_u32::<E>(self.error_code as u32);
+
+        if quic_version > QuicVersion::QUIC_VERSION_39 {
+            // Byte offset
+            buf.put_u64::<E>(self.byte_offset);
+        }
+
+        Ok(frame_size)
     }
 }
 
@@ -72,7 +129,7 @@ mod tests {
     const kStreamOffset: QuicStreamOffset = 0xBA98FEDC32107654;
 
     #[test]
-    fn parse_reset_frame() {
+    fn reset_frame() {
         #[cfg_attr(rustfmt, rustfmt_skip)]
         const test_cases: &[(QuicVersion, &[u8])] = &[
             (
@@ -119,20 +176,34 @@ mod tests {
             ),
         ];
 
+        let header = QuicPacketHeader::default();
         let reset_stream_frame = QuicRstStreamFrame {
             stream_id: kStreamId,
             error_code: QuicRstStreamErrorCode::QUIC_ERROR_PROCESSING_STREAM,
             byte_offset: kStreamOffset,
         };
 
-        for &(quic_version, bytes) in test_cases {
-            assert_eq!(reset_stream_frame.frame_size(), bytes.len());
+        for &(quic_version, payload) in test_cases {
             assert_eq!(
-                QuicRstStreamFrame::parse(quic_version, bytes).unwrap(),
+                reset_stream_frame.frame_size(quic_version, &header),
+                payload.len()
+            );
+            assert_eq!(
+                QuicRstStreamFrame::parse(quic_version, &header, payload).unwrap(),
                 (reset_stream_frame.clone(), &[][..]),
                 "parse reset stream frame, version {:?}",
                 quic_version,
             );
+
+            let mut buf = Vec::with_capacity(payload.len());
+
+            assert_eq!(
+                reset_stream_frame
+                    .write_frame(quic_version, &header, &mut buf)
+                    .unwrap(),
+                buf.len()
+            );
+            assert_eq!(&buf, &payload);
         }
     }
 }
