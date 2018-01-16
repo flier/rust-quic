@@ -11,19 +11,19 @@ use constants::{kQuicFrameTypeSize, kQuicFrameTypeStreamMask, kQuicFrameTypeStre
 use errors::QuicError::{self, IncompletePacket};
 use frames::{FromWire, ToWire};
 use packet::QuicPacketHeader;
-use types::{QuicFrameType, QuicStreamId, QuicStreamOffset, QuicVersion};
+use types::{QuicStreamId, QuicStreamOffset, QuicVersion};
 
 // Stream type format is 11FSSOOD.
 // Stream frame relative shifts and masks for interpreting the stream flags.
 // StreamID may be 1, 2, 3, or 4 bytes.
+const kQuicStreamIdLengthNumBits_Pre40: usize = 2;
 const kQuicStreamIdLengthShift_Pre40: usize = 0;
-const kQuicStreamIDLengthNumBits_Pre40: usize = 2;
+const kQuicStreamIdLengthNumBits: usize = 2;
 const kQuicStreamIdLengthShift: usize = 3;
-const kQuicStreamIDLengthNumBits: usize = 2;
 
 // Offset may be 0, 2, 4, or 8 bytes.
 const kQuicStreamOffsetNumBits_Pre40: usize = 3;
-const kQuicStreamOffsetShift_Pre40: usize = 3;
+const kQuicStreamOffsetShift_Pre40: usize = 2;
 const kQuicStreamOffsetNumBits: usize = 2;
 const kQuicStreamOffsetShift: usize = 1;
 
@@ -68,7 +68,7 @@ impl<'a> FromWire<'a> for QuicStreamFrame<'a> {
                     1
                         + extract_bits!(
                             flags,
-                            kQuicStreamIDLengthNumBits_Pre40,
+                            kQuicStreamIdLengthNumBits_Pre40,
                             kQuicStreamIdLengthShift_Pre40
                         ) as usize,
                     match extract_bits!(
@@ -85,7 +85,7 @@ impl<'a> FromWire<'a> for QuicStreamFrame<'a> {
             } else {
                 let flags = frame_type & !kQuicFrameTypeStreamMask;
                 (
-                    1 + extract_bits!(flags, kQuicStreamIDLengthNumBits, kQuicStreamIdLengthShift) as usize,
+                    1 + extract_bits!(flags, kQuicStreamIdLengthNumBits, kQuicStreamIdLengthShift) as usize,
                     match 1 << extract_bits!(flags, kQuicStreamOffsetNumBits, kQuicStreamOffsetShift) {
                         1 => 0,
                         n => n,
@@ -170,16 +170,22 @@ impl<'a> ToWire for QuicStreamFrame<'a> {
 
         let stream_id_size = stream_id_size(self.stream_id);
         let stream_offset_size = stream_offset_size(quic_version, self.offset);
-        let mut flags = QuicFrameType::Stream as u8;
+        let mut flags;
 
         if quic_version < QuicVersion::QUIC_VERSION_40 {
+            flags = kQuicFrameTypeStreamMask_Pre40;
+
             set_bits!(flags, stream_id_size as u8 - 1, kQuicStreamIdLengthShift_Pre40);
-            set_bits!(flags, if stream_offset_size == 0 { 0 } else { stream_offset_size as u8 - 1 }, kQuicStreamOffsetShift_Pre40);
+            if stream_offset_size > 0 {
+                set_bits!(flags, stream_offset_size as u8 - 1, kQuicStreamOffsetShift_Pre40);
+            }
             set_bool!(flags, self.data.map_or(false, |v| !v.is_empty()), kQuicStreamDataLengthShift_Pre40);
             set_bool!(flags, self.fin, kQuicStreamFinShift_Pre40);
         } else {
+            flags = kQuicFrameTypeStreamMask;
+
             set_bits!(flags, stream_id_size as u8 - 1, kQuicStreamIdLengthShift);
-            set_bits!(flags, stream_offset_size.next_power_of_two() as u8 - 1, kQuicStreamOffsetShift);
+            set_bits!(flags, stream_offset_size.next_power_of_two().trailing_zeros() as u8, kQuicStreamOffsetShift);
             set_bool!(flags, self.data.map_or(false, |v| !v.is_empty()), kQuicStreamDataLengthShift);
             set_bool!(flags, self.fin, kQuicStreamFinShift);
         }
@@ -268,7 +274,7 @@ mod tests {
                 QuicVersion::QUIC_VERSION_38,
                 &[
                     // frame type (stream frame with fin)
-                    0b1111011,
+                    0xFF,
                     // stream id
                     0x04, 0x03, 0x02, 0x01,
                     // offset
@@ -286,7 +292,7 @@ mod tests {
                 QuicVersion::QUIC_VERSION_39,
                 &[
                     // frame type (stream frame with fin)
-                    0b1111011,
+                    0xFF,
                     // stream id
                     0x01, 0x02, 0x03, 0x04,
                     // offset
@@ -304,7 +310,7 @@ mod tests {
                 QuicVersion::QUIC_VERSION_40,
                 &[
                     // frame type (stream frame with fin)
-                    0b111111,
+                    0xFF,
                     // data length
                     0x00, 0x0c,
                     // stream id
