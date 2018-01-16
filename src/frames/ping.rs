@@ -23,16 +23,12 @@ impl<'a> FromWire<'a> for QuicPingFrame {
         _header: &QuicPacketHeader,
         payload: &'a [u8],
     ) -> Result<(Self::Frame, &'a [u8]), Self::Error> {
-        if let Some((&frame_type, remaining)) = payload.split_first() {
-            if frame_type == QuicFrameType::Ping as u8 {
+        match payload.split_first() {
+            Some((&frame_type, remaining)) if frame_type == QuicFrameType::Ping as u8 => {
                 Ok((QuicPingFrame {}, remaining))
-            } else {
-                bail!(QuicError::IllegalFrameType(frame_type))
-            }
-        } else {
-            bail!(QuicError::IncompletePacket(
-                Needed::Size(kQuicFrameTypeSize)
-            ))
+            },
+            Some((&frame_type, _)) => bail!(QuicError::IllegalFrameType(frame_type)),
+            _ => bail!(QuicError::IncompletePacket(Needed::Size(kQuicFrameTypeSize))),
         }
     }
 }

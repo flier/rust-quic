@@ -1,6 +1,7 @@
 use byteorder::ByteOrder;
 use bytes::BufMut;
 use failure::Error;
+use nom::Needed;
 
 use constants::kQuicFrameTypeSize;
 use errors::QuicError;
@@ -44,9 +45,8 @@ impl<'a> FromWire<'a> for QuicPaddingFrame {
                     &remaining[num_padding_bytes..],
                 ))
             }
-            _ => bail!(QuicError::IllegalFrameType(
-                payload.first().cloned().unwrap_or_default()
-            )),
+            Some((&frame_type, _)) => bail!(QuicError::IllegalFrameType(frame_type)),
+            _ => bail!(QuicError::IncompletePacket(Needed::Size(kQuicFrameTypeSize))),
         }
     }
 }
