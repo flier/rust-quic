@@ -25,5 +25,5 @@ pub use self::ping::QuicPingFrame;
 pub use self::reset::QuicRstStreamFrame;
 pub use self::stop_waiting::QuicStopWaitingFrame;
 pub use self::stream::QuicStreamFrame;
-pub use self::traits::{BufMutExt, FromWire, ToWire};
+pub use self::traits::{BufMutExt, FromWire, QuicFrameReader, QuicFrameWriter, ReadFrame, ToWire, WriteFrame};
 pub use self::win_update::QuicWindowUpdateFrame;

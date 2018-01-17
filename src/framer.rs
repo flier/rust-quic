@@ -1,11 +1,12 @@
 #![allow(non_upper_case_globals)]
 
 use std::cmp;
+use std::io::Cursor;
 use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 use byteorder::{ByteOrder, NativeEndian, NetworkEndian};
-use bytes::Bytes;
+use bytes::{Buf, BufMut, Bytes};
 use failure::{Error, ResultExt};
 use nom::{IResult, le_u16};
 
@@ -13,8 +14,9 @@ use constants::kMaxPacketSize;
 use crypto::{CryptoHandshakeMessage, NullDecrypter, QuicDecrypter, kCADR, kPRST, kRNON};
 use errors::QuicError;
 use errors::QuicError::*;
-use frames::{FromWire, QuicAckFrame, QuicBlockedFrame, QuicConnectionCloseFrame, QuicGoAwayFrame, QuicPaddingFrame,
-             QuicPingFrame, QuicRstStreamFrame, QuicStopWaitingFrame, QuicStreamFrame, QuicWindowUpdateFrame};
+use frames::{FromWire, QuicAckFrame, QuicBlockedFrame, QuicConnectionCloseFrame, QuicFrameReader, QuicFrameWriter,
+             QuicGoAwayFrame, QuicPaddingFrame, QuicPingFrame, QuicRstStreamFrame, QuicStopWaitingFrame,
+             QuicStreamFrame, QuicWindowUpdateFrame, ReadFrame, WriteFrame};
 use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketPublicHeader, QuicPublicResetPacket,
              QuicVersionNegotiationPacket};
 use types::{EncryptionLevel, Perspective, QuicFrameType, QuicPacketNumber, QuicTime, QuicTimeDelta, QuicVersion,
@@ -323,7 +325,7 @@ where
         }
 
         // Handle the payload.
-        self.process_frame_data(&payload, &header)?;
+        self.process_frame_data(&header, &payload)?;
 
         self.visitor.on_packet_complete();
 
@@ -445,7 +447,9 @@ where
         self.largest_packet_number = cmp::max(self.largest_packet_number, header.packet_number);
     }
 
-    fn process_frame_data(&self, mut payload: &[u8], header: &QuicPacketHeader) -> Result<(), Error> {
+    fn process_frame_data(&self, header: &QuicPacketHeader, mut payload: &[u8]) -> Result<(), Error> {
+        let mut reader = FrameReader::new(self, header, payload);
+
         while let Some(&frame_type) = payload.first() {
             match QuicFrameType::with_version(self.quic_version, frame_type)? {
                 QuicFrameType::Padding => {
@@ -566,12 +570,7 @@ where
                     payload = remaining;
                 }
                 QuicFrameType::Ack => {
-                    let (frame, remaining) = QuicAckFrame::parse(
-                        self.quic_version,
-                        self.creation_time,
-                        self.last_timestamp,
-                        payload,
-                    )?;
+                    let frame = reader.read_frame::<QuicAckFrame>()?;
 
                     debug!("parsed frame: {:?}", frame);
 
@@ -580,14 +579,104 @@ where
 
                         return Ok(());
                     }
-
-                    payload = remaining;
                 }
                 _ => bail!(IllegalFrameType(frame_type)),
             }
         }
 
         Ok(())
+    }
+}
+
+struct FrameReader<'a, V>
+where
+    V: 'a,
+{
+    framer: &'a QuicFramer<'a, V>,
+    header: &'a QuicPacketHeader<'a>,
+    payload: Cursor<&'a [u8]>,
+}
+
+impl<'a, V> FrameReader<'a, V> {
+    pub fn new(
+        framer: &'a QuicFramer<'a, V>,
+        header: &'a QuicPacketHeader<'a>,
+        payload: &'a [u8],
+    ) -> FrameReader<'a, V> {
+        FrameReader {
+            framer,
+            header,
+            payload: Cursor::new(payload),
+        }
+    }
+}
+
+impl<'a, V> Buf for FrameReader<'a, V> {
+    fn remaining(&self) -> usize {
+        self.payload.remaining()
+    }
+
+    fn bytes(&self) -> &[u8] {
+        self.payload.bytes()
+    }
+
+    fn advance(&mut self, cnt: usize) {
+        self.payload.advance(cnt)
+    }
+}
+
+impl<'a, V> QuicFrameReader<'a> for FrameReader<'a, V> {
+    fn packet_header(&self) -> &QuicPacketHeader {
+        self.header
+    }
+
+    fn quic_version(&self) -> QuicVersion {
+        self.framer.quic_version
+    }
+
+    fn creation_time(&self) -> QuicTime {
+        self.framer.creation_time
+    }
+
+    fn last_timestamp(&self) -> QuicTimeDelta {
+        self.framer.last_timestamp
+    }
+}
+
+struct FrameWriter<'a, V>
+where
+    V: 'a,
+{
+    framer: &'a QuicFramer<'a, V>,
+    header: &'a QuicPacketHeader<'a>,
+    payload: Cursor<&'a mut [u8]>,
+}
+
+impl<'a, V> BufMut for FrameWriter<'a, V> {
+    fn remaining_mut(&self) -> usize {
+        self.payload.remaining_mut()
+    }
+
+    unsafe fn advance_mut(&mut self, cnt: usize) {
+        self.payload.advance_mut(cnt)
+    }
+
+    unsafe fn bytes_mut(&mut self) -> &mut [u8] {
+        self.payload.bytes_mut()
+    }
+}
+
+impl<'a, V> QuicFrameWriter<'a> for FrameWriter<'a, V> {
+    fn packet_header(&self) -> &QuicPacketHeader {
+        self.header
+    }
+
+    fn quic_version(&self) -> QuicVersion {
+        self.framer.quic_version
+    }
+
+    fn creation_time(&self) -> QuicTime {
+        self.framer.creation_time
     }
 }
 

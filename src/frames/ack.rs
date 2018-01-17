@@ -4,7 +4,7 @@ use std::iter;
 use std::mem;
 
 use byteorder::{ByteOrder, NativeEndian, NetworkEndian};
-use bytes::BufMut;
+use bytes::{Buf, BufMut};
 use failure::{Error, Fail};
 use nom::{self, IResult, Needed, be_u8};
 use time::Duration;
@@ -12,6 +12,7 @@ use time::Duration;
 use constants::{kQuicFrameTypeAckMask, kQuicFrameTypeAckMask_Pre40, kQuicFrameTypeSize};
 use errors::ParseError::*;
 use errors::QuicError::{self, IncompletePacket};
+use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
 use packet::{packet_number_flags, packet_number_length, packet_number_size, QuicPacketHeader, QuicPacketNumberLength};
 use types::{QuicPacketNumber, QuicTime, QuicTimeDelta, QuicVersion, ToQuicTimeDelta, UFloat16, ufloat16};
 
@@ -45,8 +46,42 @@ pub struct QuicAckFrame {
     pub packets: PacketNumberQueue,
 }
 
+impl<'a> ReadFrame<'a> for QuicAckFrame {
+    type Frame = QuicAckFrame;
+    type Error = Error;
+
+    fn read_frame<E, R>(reader: &mut R) -> Result<Self::Frame, Self::Error>
+    where
+        E: ByteOrder,
+        R: QuicFrameReader<'a>,
+    {
+        let (frame, frame_size) = Self::parse(
+            reader.quic_version(),
+            reader.creation_time(),
+            reader.last_timestamp(),
+            reader.bytes(),
+        ).map(|(frame, remaining)| (frame, reader.remaining() - remaining.len()))?;
+
+        reader.advance(frame_size);
+
+        Ok(frame)
+    }
+}
+
+impl<'a> WriteFrame<'a> for QuicAckFrame {
+    type Error = Error;
+
+    fn write_frame<E, W>(&self, writer: &mut W) -> Result<usize, Self::Error>
+    where
+        E: ByteOrder,
+        W: QuicFrameWriter<'a>,
+    {
+        self.write_to::<E, W>(writer.quic_version(), writer.creation_time(), writer)
+    }
+}
+
 impl QuicAckFrame {
-    pub fn parse(
+    fn parse(
         quic_version: QuicVersion,
         creation_time: QuicTime,
         last_timestamp: QuicTimeDelta,
@@ -113,26 +148,20 @@ impl QuicAckFrame {
         &self,
         quic_version: QuicVersion,
         creation_time: QuicTime,
-        header: &QuicPacketHeader,
+        _header: &QuicPacketHeader,
         buf: &mut T,
     ) -> Result<usize, Error>
     where
         T: BufMut,
     {
         if quic_version > QuicVersion::QUIC_VERSION_38 {
-            self.write_to::<NetworkEndian, T>(quic_version, creation_time, header, buf)
+            self.write_to::<NetworkEndian, T>(quic_version, creation_time, buf)
         } else {
-            self.write_to::<NativeEndian, T>(quic_version, creation_time, header, buf)
+            self.write_to::<NativeEndian, T>(quic_version, creation_time, buf)
         }
     }
 
-    fn write_to<E, T>(
-        &self,
-        quic_version: QuicVersion,
-        creation_time: QuicTime,
-        header: &QuicPacketHeader,
-        buf: &mut T,
-    ) -> Result<usize, Error>
+    fn write_to<E, T>(&self, quic_version: QuicVersion, creation_time: QuicTime, buf: &mut T) -> Result<usize, Error>
     where
         E: ByteOrder,
         T: BufMut,

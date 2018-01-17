@@ -1,8 +1,8 @@
 use byteorder::{ByteOrder, NativeEndian, NetworkEndian};
-use bytes::BufMut;
+use bytes::{Buf, BufMut};
 
 use packet::QuicPacketHeader;
-use types::QuicVersion;
+use types::{QuicTime, QuicTimeDelta, QuicVersion};
 
 pub trait FromWire<'a> {
     type Frame;
@@ -66,3 +66,62 @@ pub trait BufMutExt: BufMut {
 }
 
 impl<T: BufMut> BufMutExt for T {}
+
+pub trait ReadFrame<'a> {
+    type Frame;
+    type Error;
+
+    fn read_frame<E, R>(reader: &mut R) -> Result<Self::Frame, Self::Error>
+    where
+        E: ByteOrder,
+        R: QuicFrameReader<'a>;
+}
+
+pub trait WriteFrame<'a> {
+    type Error;
+
+    fn write_frame<E, W>(&self, writer: &mut W) -> Result<usize, Self::Error>
+    where
+        E: ByteOrder,
+        W: QuicFrameWriter<'a>;
+}
+
+pub trait QuicFrameReader<'a>: Buf
+where
+    Self: Sized,
+{
+    fn read_frame<F: ReadFrame<'a>>(&mut self) -> Result<F::Frame, F::Error> {
+        if self.quic_version() > QuicVersion::QUIC_VERSION_38 {
+            F::read_frame::<NetworkEndian, Self>(self)
+        } else {
+            F::read_frame::<NativeEndian, Self>(self)
+        }
+    }
+
+    fn packet_header(&self) -> &QuicPacketHeader;
+
+    fn quic_version(&self) -> QuicVersion;
+
+    fn creation_time(&self) -> QuicTime;
+
+    fn last_timestamp(&self) -> QuicTimeDelta;
+}
+
+pub trait QuicFrameWriter<'a>: BufMut
+where
+    Self: Sized,
+{
+    fn write_frame<F: WriteFrame<'a>>(&mut self, frame: F) -> Result<usize, F::Error> {
+        if self.quic_version() > QuicVersion::QUIC_VERSION_38 {
+            frame.write_frame::<NetworkEndian, Self>(self)
+        } else {
+            frame.write_frame::<NativeEndian, Self>(self)
+        }
+    }
+
+    fn packet_header(&self) -> &QuicPacketHeader;
+
+    fn quic_version(&self) -> QuicVersion;
+
+    fn creation_time(&self) -> QuicTime;
+}
