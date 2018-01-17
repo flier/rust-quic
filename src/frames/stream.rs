@@ -134,7 +134,6 @@ impl<'a> FromWire<'a> for QuicStreamFrame<'a> {
     }
 }
 
-
 impl<'a> ToWire for QuicStreamFrame<'a> {
     type Frame = QuicStreamFrame<'a>;
     type Error = Error;
@@ -175,18 +174,38 @@ impl<'a> ToWire for QuicStreamFrame<'a> {
         if quic_version < QuicVersion::QUIC_VERSION_40 {
             flags = kQuicFrameTypeStreamMask_Pre40;
 
-            set_bits!(flags, stream_id_size as u8 - 1, kQuicStreamIdLengthShift_Pre40);
+            set_bits!(
+                flags,
+                stream_id_size as u8 - 1,
+                kQuicStreamIdLengthShift_Pre40
+            );
             if stream_offset_size > 0 {
-                set_bits!(flags, stream_offset_size as u8 - 1, kQuicStreamOffsetShift_Pre40);
+                set_bits!(
+                    flags,
+                    stream_offset_size as u8 - 1,
+                    kQuicStreamOffsetShift_Pre40
+                );
             }
-            set_bool!(flags, self.data.map_or(false, |v| !v.is_empty()), kQuicStreamDataLengthShift_Pre40);
+            set_bool!(
+                flags,
+                self.data.map_or(false, |v| !v.is_empty()),
+                kQuicStreamDataLengthShift_Pre40
+            );
             set_bool!(flags, self.fin, kQuicStreamFinShift_Pre40);
         } else {
             flags = kQuicFrameTypeStreamMask;
 
             set_bits!(flags, stream_id_size as u8 - 1, kQuicStreamIdLengthShift);
-            set_bits!(flags, stream_offset_size.next_power_of_two().trailing_zeros() as u8, kQuicStreamOffsetShift);
-            set_bool!(flags, self.data.map_or(false, |v| !v.is_empty()), kQuicStreamDataLengthShift);
+            set_bits!(
+                flags,
+                stream_offset_size.next_power_of_two().trailing_zeros() as u8,
+                kQuicStreamOffsetShift
+            );
+            set_bool!(
+                flags,
+                self.data.map_or(false, |v| !v.is_empty()),
+                kQuicStreamDataLengthShift
+            );
             set_bool!(flags, self.fin, kQuicStreamFinShift);
         }
 
@@ -354,7 +373,11 @@ mod tests {
                     .unwrap(),
                 buf.len()
             );
-            assert_eq!(&buf, &payload, "write stream frame {:?}, version {:?}", stream_frame, quic_version);
+            assert_eq!(
+                &buf, &payload,
+                "write stream frame {:?}, version {:?}",
+                stream_frame, quic_version
+            );
         }
     }
 }

@@ -37,10 +37,7 @@ pub const PACKET_4BYTE_PACKET_NUMBER: QuicPacketNumberLength = 4;
 pub const PACKET_6BYTE_PACKET_NUMBER: QuicPacketNumberLength = 6;
 pub const PACKET_8BYTE_PACKET_NUMBER: QuicPacketNumberLength = 8;
 
-pub fn read_ack_packet_number_length(
-    version: QuicVersion,
-    flags: QuicPacketNumberLengthFlags,
-) -> QuicPacketNumberLength {
+pub fn packet_number_length(version: QuicVersion, flags: QuicPacketNumberLengthFlags) -> QuicPacketNumberLength {
     match flags & PACKET_FLAGS_8BYTE_PACKET {
         PACKET_FLAGS_8BYTE_PACKET => if version <= QuicVersion::QUIC_VERSION_39 {
             PACKET_6BYTE_PACKET_NUMBER
@@ -50,7 +47,25 @@ pub fn read_ack_packet_number_length(
         PACKET_FLAGS_4BYTE_PACKET => PACKET_4BYTE_PACKET_NUMBER,
         PACKET_FLAGS_2BYTE_PACKET => PACKET_2BYTE_PACKET_NUMBER,
         PACKET_FLAGS_1BYTE_PACKET => PACKET_1BYTE_PACKET_NUMBER,
-        _ => PACKET_6BYTE_PACKET_NUMBER,
+        n => {
+            warn!("unexpected packet number flags: {}", n);
+
+            PACKET_6BYTE_PACKET_NUMBER
+        }
+    }
+}
+
+pub fn packet_number_flags(packet_number_length: QuicPacketNumberLength) -> QuicPacketNumberLengthFlags {
+    match packet_number_length {
+        PACKET_1BYTE_PACKET_NUMBER => PACKET_FLAGS_1BYTE_PACKET,
+        PACKET_2BYTE_PACKET_NUMBER => PACKET_FLAGS_2BYTE_PACKET,
+        PACKET_4BYTE_PACKET_NUMBER => PACKET_FLAGS_4BYTE_PACKET,
+        PACKET_6BYTE_PACKET_NUMBER | PACKET_8BYTE_PACKET_NUMBER => PACKET_FLAGS_8BYTE_PACKET,
+        n => {
+            warn!("unexpected packet number length: {}", n);
+
+            PACKET_FLAGS_8BYTE_PACKET
+        }
     }
 }
 

@@ -26,9 +26,11 @@ impl<'a> FromWire<'a> for QuicPingFrame {
         match payload.split_first() {
             Some((&frame_type, remaining)) if frame_type == QuicFrameType::Ping as u8 => {
                 Ok((QuicPingFrame {}, remaining))
-            },
+            }
             Some((&frame_type, _)) => bail!(QuicError::IllegalFrameType(frame_type)),
-            _ => bail!(QuicError::IncompletePacket(Needed::Size(kQuicFrameTypeSize))),
+            _ => bail!(QuicError::IncompletePacket(Needed::Size(
+                kQuicFrameTypeSize
+            ))),
         }
     }
 }

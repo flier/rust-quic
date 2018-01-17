@@ -19,7 +19,6 @@ pub struct QuicStopWaitingFrame {
     least_unacked: QuicPacketNumber,
 }
 
-
 impl<'a> FromWire<'a> for QuicStopWaitingFrame {
     type Frame = QuicStopWaitingFrame;
     type Error = Error;

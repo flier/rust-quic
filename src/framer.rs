@@ -13,9 +13,8 @@ use constants::kMaxPacketSize;
 use crypto::{CryptoHandshakeMessage, NullDecrypter, QuicDecrypter, kCADR, kPRST, kRNON};
 use errors::QuicError;
 use errors::QuicError::*;
-use frames::{QuicAckFrame, QuicBlockedFrame, QuicPingFrame, FromWire,
-             QuicConnectionCloseFrame, QuicGoAwayFrame, QuicPaddingFrame, QuicRstStreamFrame, QuicStopWaitingFrame,
-             QuicStreamFrame, QuicWindowUpdateFrame};
+use frames::{FromWire, QuicAckFrame, QuicBlockedFrame, QuicConnectionCloseFrame, QuicGoAwayFrame, QuicPaddingFrame,
+             QuicPingFrame, QuicRstStreamFrame, QuicStopWaitingFrame, QuicStreamFrame, QuicWindowUpdateFrame};
 use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketPublicHeader, QuicPublicResetPacket,
              QuicVersionNegotiationPacket};
 use types::{EncryptionLevel, Perspective, QuicFrameType, QuicPacketNumber, QuicTime, QuicTimeDelta, QuicVersion,
@@ -528,11 +527,7 @@ where
                     payload = remaining;
                 }
                 QuicFrameType::StopWaiting => {
-                    let (frame, remaining) = QuicStopWaitingFrame::parse(
-                        self.quic_version,
-                        header,
-                        payload,
-                    )?;
+                    let (frame, remaining) = QuicStopWaitingFrame::parse(self.quic_version, header, payload)?;
 
                     debug!("parsed frame: {:?}", frame);
 
@@ -545,11 +540,7 @@ where
                     payload = remaining;
                 }
                 QuicFrameType::Ping => {
-                    let (frame, remaining) = QuicPingFrame::parse(
-                        self.quic_version,
-                        header,
-                        payload,
-                    )?;
+                    let (frame, remaining) = QuicPingFrame::parse(self.quic_version, header, payload)?;
 
                     debug!("parsed frame: {:?}", frame);
 
@@ -592,9 +583,7 @@ where
 
                     payload = remaining;
                 }
-                _ => {
-                    bail!(IllegalFrameType(frame_type))
-                }
+                _ => bail!(IllegalFrameType(frame_type)),
             }
         }
 

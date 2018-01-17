@@ -40,7 +40,6 @@ impl<'a> FromWire<'a> for QuicConnectionCloseFrame<'a> {
     }
 }
 
-
 impl<'a> ToWire for QuicConnectionCloseFrame<'a> {
     type Frame = QuicConnectionCloseFrame<'a>;
     type Error = Error;
@@ -87,15 +86,11 @@ fn parse_quic_connection_close_frame(
 ) -> IResult<&[u8], QuicConnectionCloseFrame> {
     do_parse!(
         input,
-        _frame_type: frame_type!(QuicFrameType::ConnectionClose) >>
-        error_code: error_code!(quic_version.endianness()) >>
-        error_details: string_piece16!(quic_version.endianness()) >>
-        (
-            QuicConnectionCloseFrame {
-                error_code,
-                error_details,
-            }
-        )
+        _frame_type: frame_type!(QuicFrameType::ConnectionClose) >> error_code: error_code!(quic_version.endianness())
+            >> error_details: string_piece16!(quic_version.endianness()) >> (QuicConnectionCloseFrame {
+            error_code,
+            error_details,
+        })
     )
 }
 

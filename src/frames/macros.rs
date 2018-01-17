@@ -31,7 +31,7 @@ macro_rules! set_bool {
         if $bit {
             $flags |= 1 << ($shift)
         } else {
-            $flags ^= 1 << ($shift)
+            $flags &= !(1 << ($shift))
         }
     };
 }

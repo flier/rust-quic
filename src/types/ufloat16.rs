@@ -33,6 +33,10 @@ impl UFloat16 {
     pub fn max_value() -> Self {
         MAX
     }
+
+    pub fn new(v: u64) -> Self {
+        UFloat16(v)
+    }
 }
 
 impl From<UFloat16> for u64 {
