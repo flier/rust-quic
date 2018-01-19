@@ -7,8 +7,7 @@ use nom::IResult;
 
 use constants::kQuicFrameTypeSize;
 use errors::QuicError;
-use frames::{FromWire, ToWire};
-use packet::QuicPacketHeader;
+use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
 use types::{QuicFrameType, QuicStreamId, QuicStreamOffset, QuicVersion};
 
 /// The GOAWAY frame allows for notification that the connection should stop being used,
@@ -26,16 +25,16 @@ pub struct QuicWindowUpdateFrame {
     byte_offset: QuicStreamOffset,
 }
 
-impl<'a> FromWire<'a> for QuicWindowUpdateFrame {
+impl<'a> ReadFrame<'a> for QuicWindowUpdateFrame {
     type Frame = QuicWindowUpdateFrame;
     type Error = Error;
 
-    fn parse(
-        quic_version: QuicVersion,
-        _header: &QuicPacketHeader,
-        payload: &'a [u8],
-    ) -> Result<(Self::Frame, &'a [u8]), Self::Error> {
-        match parse_quic_window_update_frame(payload, quic_version) {
+    fn read_frame<E, R>(reader: &R, payload: &'a [u8]) -> Result<(Self::Frame, &'a [u8]), Self::Error>
+    where
+        E: ByteOrder,
+        R: QuicFrameReader<'a>,
+    {
+        match parse_quic_window_update_frame(payload, reader.quic_version()) {
             IResult::Done(remaining, frame) => Ok((frame, remaining)),
             IResult::Incomplete(needed) => bail!(QuicError::IncompletePacket(needed)),
             IResult::Error(err) => bail!(QuicError::from(err)),
@@ -43,11 +42,13 @@ impl<'a> FromWire<'a> for QuicWindowUpdateFrame {
     }
 }
 
-impl ToWire for QuicWindowUpdateFrame {
-    type Frame = QuicWindowUpdateFrame;
+impl<'a> WriteFrame<'a> for QuicWindowUpdateFrame {
     type Error = Error;
 
-    fn frame_size(&self, _quic_version: QuicVersion, _header: &QuicPacketHeader) -> usize {
+    fn frame_size<W>(&self, _writer: &W) -> usize
+    where
+        W: QuicFrameWriter<'a>,
+    {
         // Frame Type
         kQuicFrameTypeSize +
         // Stream ID
@@ -56,17 +57,13 @@ impl ToWire for QuicWindowUpdateFrame {
         mem::size_of::<QuicStreamOffset>()
     }
 
-    fn write_to<E, T>(
-        &self,
-        quic_version: QuicVersion,
-        header: &QuicPacketHeader,
-        buf: &mut T,
-    ) -> Result<usize, Self::Error>
+    fn write_frame<E, W, B>(&self, writer: &W, buf: &mut B) -> Result<usize, Self::Error>
     where
         E: ByteOrder,
-        T: BufMut,
+        W: QuicFrameWriter<'a>,
+        B: BufMut,
     {
-        let frame_size = self.frame_size(quic_version, header);
+        let frame_size = self.frame_size(writer);
 
         if buf.remaining_mut() < frame_size {
             bail!(QuicError::NotEnoughBuffer(frame_size))
@@ -99,6 +96,8 @@ named_args!(
 
 #[cfg(test)]
 mod tests {
+    use frames::mocks;
+
     use super::*;
 
     #[test]
@@ -131,19 +130,17 @@ mod tests {
             ),
         ];
 
-        let header = QuicPacketHeader::default();
         let window_update_frame = QuicWindowUpdateFrame {
             stream_id: 0x01020304,
             byte_offset: 0x0c0b0a0908070605,
         };
 
         for &(quic_version, payload) in test_cases {
+            let (reader, writer) = mocks::pair(quic_version);
+
+            assert_eq!(window_update_frame.frame_size(&writer), payload.len());
             assert_eq!(
-                window_update_frame.frame_size(quic_version, &header),
-                payload.len()
-            );
-            assert_eq!(
-                QuicWindowUpdateFrame::parse(quic_version, &header, payload).unwrap(),
+                reader.read_frame::<QuicWindowUpdateFrame>(payload).unwrap(),
                 (window_update_frame.clone(), &[][..]),
                 "parse window update stream frame, version {:?}",
                 quic_version,
@@ -152,9 +149,7 @@ mod tests {
             let mut buf = Vec::with_capacity(payload.len());
 
             assert_eq!(
-                window_update_frame
-                    .write_frame(quic_version, &header, &mut buf)
-                    .unwrap(),
+                writer.write_frame(&window_update_frame, &mut buf).unwrap(),
                 buf.len()
             );
             assert_eq!(&buf, &payload);

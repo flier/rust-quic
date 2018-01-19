@@ -2,10 +2,9 @@ use byteorder::ByteOrder;
 use bytes::BufMut;
 use failure::Error;
 
-use frames::{QuicAckFrame, QuicBlockedFrame, QuicConnectionCloseFrame, QuicGoAwayFrame, QuicPaddingFrame,
-             QuicPingFrame, QuicRstStreamFrame, QuicStopWaitingFrame, QuicStreamFrame, QuicWindowUpdateFrame, ToWire};
-use packet::QuicPacketHeader;
-use types::QuicVersion;
+use frames::{QuicAckFrame, QuicBlockedFrame, QuicConnectionCloseFrame, QuicFrameReader, QuicFrameWriter,
+             QuicGoAwayFrame, QuicPaddingFrame, QuicPingFrame, QuicRstStreamFrame, QuicStopWaitingFrame,
+             QuicStreamFrame, QuicWindowUpdateFrame, ReadFrame, ToWire, WriteFrame};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum QuicFrame<'a> {
@@ -21,47 +20,57 @@ pub enum QuicFrame<'a> {
     Ack(QuicAckFrame),
 }
 
-impl<'a> ToWire for QuicFrame<'a> {
-    type Frame = QuicBlockedFrame;
+impl<'a> ReadFrame<'a> for QuicFrame<'a> {
+    type Frame = QuicFrame<'a>;
     type Error = Error;
 
-    fn frame_size(&self, quic_version: QuicVersion, header: &QuicPacketHeader) -> usize {
+    fn read_frame<E, R>(reader: &'a R, payload: &'a [u8]) -> Result<(Self::Frame, &'a [u8]), Self::Error>
+    where
+        E: ByteOrder,
+        R: QuicFrameReader<'a>,
+    {
+        unreachable!()
+    }
+}
+
+impl<'a> WriteFrame<'a> for QuicFrame<'a> {
+    type Error = Error;
+
+    fn frame_size<W>(&self, writer: &W) -> usize
+    where
+        W: QuicFrameWriter<'a>,
+    {
         match *self {
-            QuicFrame::Padding(ref padding) => padding.frame_size(quic_version, header),
-            QuicFrame::ResetStream(ref reset_stream) => reset_stream.frame_size(quic_version, header),
-            QuicFrame::ConnectionClose(ref conn_close) => conn_close.frame_size(quic_version, header),
-            QuicFrame::GoAway(ref go_away) => go_away.frame_size(quic_version, header),
-            QuicFrame::WindowUpdate(ref win_update) => win_update.frame_size(quic_version, header),
-            QuicFrame::Blocked(ref blocked) => blocked.frame_size(quic_version, header),
-            QuicFrame::StopWaiting(ref stop_waiting) => stop_waiting.frame_size(quic_version, header),
-            QuicFrame::Ping(ref ping) => ping.frame_size(quic_version, header),
-            QuicFrame::Stream(ref stream) => stream.frame_size(quic_version, header),
-            QuicFrame::Ack(ref ack) => ack.frame_size(quic_version),
+            QuicFrame::Padding(ref padding) => padding.frame_size(writer),
+            QuicFrame::ResetStream(ref reset_stream) => reset_stream.frame_size(writer),
+            QuicFrame::ConnectionClose(ref conn_close) => conn_close.frame_size(writer),
+            QuicFrame::GoAway(ref go_away) => go_away.frame_size(writer),
+            QuicFrame::WindowUpdate(ref win_update) => win_update.frame_size(writer),
+            QuicFrame::Blocked(ref blocked) => blocked.frame_size(writer),
+            QuicFrame::StopWaiting(ref stop_waiting) => stop_waiting.frame_size(writer),
+            QuicFrame::Ping(ref ping) => ping.frame_size(writer.quic_version(), writer.packet_header()),
+            QuicFrame::Stream(ref stream) => stream.frame_size(writer),
+            QuicFrame::Ack(ref ack) => ack.frame_size(writer),
         }
     }
 
-    fn write_to<E, T>(
-        &self,
-        quic_version: QuicVersion,
-        header: &QuicPacketHeader,
-        buf: &mut T,
-    ) -> Result<usize, Self::Error>
+    fn write_frame<E, W, B>(&self, writer: &W, buf: &mut B) -> Result<usize, Self::Error>
     where
         E: ByteOrder,
-        T: BufMut,
+        W: QuicFrameWriter<'a>,
+        B: BufMut,
     {
         match *self {
-            QuicFrame::Padding(ref frame) => frame.write_to::<E, T>(quic_version, header, buf),
-            QuicFrame::ResetStream(ref frame) => frame.write_to::<E, T>(quic_version, header, buf),
-            QuicFrame::ConnectionClose(ref frame) => frame.write_to::<E, T>(quic_version, header, buf),
-            QuicFrame::GoAway(ref frame) => frame.write_to::<E, T>(quic_version, header, buf),
-            QuicFrame::WindowUpdate(ref frame) => frame.write_to::<E, T>(quic_version, header, buf),
-            QuicFrame::Blocked(ref frame) => frame.write_to::<E, T>(quic_version, header, buf),
-            QuicFrame::StopWaiting(ref frame) => frame.write_to::<E, T>(quic_version, header, buf),
-            QuicFrame::Ping(ref frame) => frame.write_to::<E, T>(quic_version, header, buf),
-            QuicFrame::Stream(ref frame) => frame.write_to::<E, T>(quic_version, header, buf),
-            //             QuicFrame::Ack(ref ack) => {}
-            _ => unreachable!(),
+            QuicFrame::Padding(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
+            QuicFrame::ResetStream(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
+            QuicFrame::ConnectionClose(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
+            QuicFrame::GoAway(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
+            QuicFrame::WindowUpdate(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
+            QuicFrame::Blocked(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
+            QuicFrame::StopWaiting(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
+            QuicFrame::Ping(ref frame) => frame.write_to::<E, B>(writer.quic_version(), writer.packet_header(), buf),
+            QuicFrame::Stream(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
+            QuicFrame::Ack(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
         }
     }
 }

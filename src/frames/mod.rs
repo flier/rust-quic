@@ -27,3 +27,8 @@ pub use self::stop_waiting::QuicStopWaitingFrame;
 pub use self::stream::QuicStreamFrame;
 pub use self::traits::{BufMutExt, FromWire, QuicFrameReader, QuicFrameWriter, ReadFrame, ToWire, WriteFrame};
 pub use self::win_update::QuicWindowUpdateFrame;
+
+#[cfg(test)]
+mod mocks {
+    pub use super::traits::mocks::{pair, pair_with_header, MockFrameReader, MockFrameWriter};
+}

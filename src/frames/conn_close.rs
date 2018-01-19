@@ -7,8 +7,7 @@ use nom::IResult;
 
 use constants::{kQuicFrameTypeSize, kStringPieceLenSize};
 use errors::{QuicError, QuicErrorCode};
-use frames::{BufMutExt, FromWire, ToWire};
-use packet::QuicPacketHeader;
+use frames::{BufMutExt, QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
 use types::{QuicFrameType, QuicVersion};
 
 /// The `CONNECTION_CLOSE` frame allows for notification that the connection is being closed.
@@ -23,16 +22,16 @@ pub struct QuicConnectionCloseFrame<'a> {
     pub error_details: Option<&'a str>,
 }
 
-impl<'a> FromWire<'a> for QuicConnectionCloseFrame<'a> {
+impl<'a> ReadFrame<'a> for QuicConnectionCloseFrame<'a> {
     type Frame = QuicConnectionCloseFrame<'a>;
     type Error = Error;
 
-    fn parse(
-        quic_version: QuicVersion,
-        _header: &QuicPacketHeader,
-        payload: &'a [u8],
-    ) -> Result<(QuicConnectionCloseFrame<'a>, &'a [u8]), Self::Error> {
-        match parse_quic_connection_close_frame(payload, quic_version) {
+    fn read_frame<E, R>(reader: &R, payload: &'a [u8]) -> Result<(Self::Frame, &'a [u8]), Self::Error>
+    where
+        E: ByteOrder,
+        R: QuicFrameReader<'a>,
+    {
+        match parse_quic_connection_close_frame(payload, reader.quic_version()) {
             IResult::Done(remaining, frame) => Ok((frame, remaining)),
             IResult::Incomplete(needed) => bail!(QuicError::IncompletePacket(needed)),
             IResult::Error(err) => bail!(QuicError::from(err)),
@@ -40,11 +39,13 @@ impl<'a> FromWire<'a> for QuicConnectionCloseFrame<'a> {
     }
 }
 
-impl<'a> ToWire for QuicConnectionCloseFrame<'a> {
-    type Frame = QuicConnectionCloseFrame<'a>;
+impl<'a> WriteFrame<'a> for QuicConnectionCloseFrame<'a> {
     type Error = Error;
 
-    fn frame_size(&self, _quic_version: QuicVersion, _header: &QuicPacketHeader) -> usize {
+    fn frame_size<W>(&self, _writer: &W) -> usize
+    where
+        W: QuicFrameWriter<'a>,
+    {
         // Frame Type
         kQuicFrameTypeSize +
         // Error Code
@@ -53,17 +54,13 @@ impl<'a> ToWire for QuicConnectionCloseFrame<'a> {
         kStringPieceLenSize + self.error_details.map(|s| s.len()).unwrap_or_default()
     }
 
-    fn write_to<E, T>(
-        &self,
-        quic_version: QuicVersion,
-        header: &QuicPacketHeader,
-        buf: &mut T,
-    ) -> Result<usize, Self::Error>
+    fn write_frame<E, W, B>(&self, writer: &W, buf: &mut B) -> Result<usize, Self::Error>
     where
         E: ByteOrder,
-        T: BufMut,
+        W: QuicFrameWriter<'a>,
+        B: BufMut,
     {
-        let frame_size = self.frame_size(quic_version, header);
+        let frame_size = self.frame_size(writer);
 
         if buf.remaining_mut() < frame_size {
             bail!(QuicError::NotEnoughBuffer(frame_size))
@@ -96,6 +93,8 @@ fn parse_quic_connection_close_frame(
 
 #[cfg(test)]
 mod tests {
+    use frames::mocks;
+
     use super::*;
 
     #[test]
@@ -136,19 +135,19 @@ mod tests {
             ),
         ];
 
-        let header = QuicPacketHeader::default();
         let connection_close_frame = QuicConnectionCloseFrame {
             error_code: QuicErrorCode::QUIC_INVALID_STREAM_ID,
             error_details: Some("because I can"),
         };
 
         for &(quic_version, payload) in test_cases {
+            let (reader, writer) = mocks::pair(quic_version);
+
+            assert_eq!(connection_close_frame.frame_size(&writer), payload.len());
             assert_eq!(
-                connection_close_frame.frame_size(quic_version, &header),
-                payload.len()
-            );
-            assert_eq!(
-                QuicConnectionCloseFrame::parse(quic_version, &header, payload).unwrap(),
+                reader
+                    .read_frame::<QuicConnectionCloseFrame>(payload)
+                    .unwrap(),
                 (connection_close_frame.clone(), &[][..]),
                 "parse connection close frame, version {:?}",
                 quic_version,
@@ -157,8 +156,8 @@ mod tests {
             let mut buf = Vec::with_capacity(payload.len());
 
             assert_eq!(
-                connection_close_frame
-                    .write_frame(quic_version, &header, &mut buf)
+                writer
+                    .write_frame(&connection_close_frame, &mut buf)
                     .unwrap(),
                 buf.len()
             );

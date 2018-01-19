@@ -7,8 +7,7 @@ use nom::IResult;
 
 use constants::{kQuicFrameTypeSize, kStringPieceLenSize};
 use errors::{QuicError, QuicErrorCode};
-use frames::{BufMutExt, FromWire, ToWire};
-use packet::QuicPacketHeader;
+use frames::{BufMutExt, QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
 use types::{QuicFrameType, QuicStreamId, QuicVersion};
 
 /// The GOAWAY frame allows for notification that the connection should stop being used,
@@ -24,16 +23,16 @@ pub struct QuicGoAwayFrame<'a> {
     reason_phrase: Option<&'a str>,
 }
 
-impl<'a> FromWire<'a> for QuicGoAwayFrame<'a> {
+impl<'a> ReadFrame<'a> for QuicGoAwayFrame<'a> {
     type Frame = QuicGoAwayFrame<'a>;
     type Error = Error;
 
-    fn parse(
-        quic_version: QuicVersion,
-        _header: &QuicPacketHeader,
-        payload: &'a [u8],
-    ) -> Result<(Self::Frame, &'a [u8]), Self::Error> {
-        match parse_quic_go_away_frame(payload, quic_version) {
+    fn read_frame<E, R>(reader: &R, payload: &'a [u8]) -> Result<(Self::Frame, &'a [u8]), Self::Error>
+    where
+        E: ByteOrder,
+        R: QuicFrameReader<'a>,
+    {
+        match parse_quic_go_away_frame(payload, reader.quic_version()) {
             IResult::Done(remaining, frame) => Ok((frame, remaining)),
             IResult::Incomplete(needed) => bail!(QuicError::IncompletePacket(needed)),
             IResult::Error(err) => bail!(QuicError::from(err)),
@@ -41,11 +40,13 @@ impl<'a> FromWire<'a> for QuicGoAwayFrame<'a> {
     }
 }
 
-impl<'a> ToWire for QuicGoAwayFrame<'a> {
-    type Frame = QuicGoAwayFrame<'a>;
+impl<'a> WriteFrame<'a> for QuicGoAwayFrame<'a> {
     type Error = Error;
 
-    fn frame_size(&self, _quic_version: QuicVersion, _header: &QuicPacketHeader) -> usize {
+    fn frame_size<W>(&self, _writer: &W) -> usize
+    where
+        W: QuicFrameWriter<'a>,
+    {
         // Frame Type
         kQuicFrameTypeSize +
         // Error Code
@@ -56,17 +57,13 @@ impl<'a> ToWire for QuicGoAwayFrame<'a> {
         kStringPieceLenSize + self.reason_phrase.map(|s| s.len()).unwrap_or_default()
     }
 
-    fn write_to<E, T>(
-        &self,
-        quic_version: QuicVersion,
-        header: &QuicPacketHeader,
-        buf: &mut T,
-    ) -> Result<usize, Self::Error>
+    fn write_frame<E, W, B>(&self, writer: &W, buf: &mut B) -> Result<usize, Self::Error>
     where
         E: ByteOrder,
-        T: BufMut,
+        W: QuicFrameWriter<'a>,
+        B: BufMut,
     {
-        let frame_size = self.frame_size(quic_version, header);
+        let frame_size = self.frame_size(writer);
 
         if buf.remaining_mut() < frame_size {
             bail!(QuicError::NotEnoughBuffer(frame_size))
@@ -103,6 +100,8 @@ named_args!(
 
 #[cfg(test)]
 mod tests {
+    use frames::mocks;
+
     use super::*;
 
     #[test]
@@ -147,7 +146,6 @@ mod tests {
             ),
         ];
 
-        let header = QuicPacketHeader::default();
         let go_away_frame = QuicGoAwayFrame {
             error_code: QuicErrorCode::QUIC_INVALID_ACK_DATA,
             last_good_stream_id: Some(0x01020304),
@@ -155,12 +153,11 @@ mod tests {
         };
 
         for &(quic_version, payload) in test_cases {
+            let (reader, writer) = mocks::pair(quic_version);
+
+            assert_eq!(go_away_frame.frame_size(&writer), payload.len());
             assert_eq!(
-                go_away_frame.frame_size(quic_version, &header),
-                payload.len()
-            );
-            assert_eq!(
-                QuicGoAwayFrame::parse(quic_version, &header, payload).unwrap(),
+                reader.read_frame::<QuicGoAwayFrame>(payload).unwrap(),
                 (go_away_frame.clone(), &[][..]),
                 "parse go away stream frame, version {:?}",
                 quic_version,
@@ -169,9 +166,7 @@ mod tests {
             let mut buf = Vec::with_capacity(payload.len());
 
             assert_eq!(
-                go_away_frame
-                    .write_frame(quic_version, &header, &mut buf)
-                    .unwrap(),
+                writer.write_frame(&go_away_frame, &mut buf).unwrap(),
                 buf.len()
             );
             assert_eq!(&buf, &payload);

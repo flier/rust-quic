@@ -4,7 +4,7 @@ use std::iter;
 use std::mem;
 
 use byteorder::{ByteOrder, NativeEndian, NetworkEndian};
-use bytes::{Buf, BufMut};
+use bytes::BufMut;
 use failure::{Error, Fail};
 use nom::{self, IResult, Needed, be_u8};
 use time::Duration;
@@ -13,7 +13,7 @@ use constants::{kQuicFrameTypeAckMask, kQuicFrameTypeAckMask_Pre40, kQuicFrameTy
 use errors::ParseError::*;
 use errors::QuicError::{self, IncompletePacket};
 use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
-use packet::{packet_number_flags, packet_number_length, packet_number_size, QuicPacketHeader, QuicPacketNumberLength};
+use packet::{packet_number_flags, packet_number_length, packet_number_size, QuicPacketNumberLength};
 use types::{QuicPacketNumber, QuicTime, QuicTimeDelta, QuicVersion, ToQuicTimeDelta, UFloat16, ufloat16};
 
 const MAX_U8: u64 = u8::MAX as u64;
@@ -50,33 +50,37 @@ impl<'a> ReadFrame<'a> for QuicAckFrame {
     type Frame = QuicAckFrame;
     type Error = Error;
 
-    fn read_frame<E, R>(reader: &mut R) -> Result<Self::Frame, Self::Error>
+    fn read_frame<E, R>(reader: &R, payload: &'a [u8]) -> Result<(Self::Frame, &'a [u8]), Self::Error>
     where
         E: ByteOrder,
         R: QuicFrameReader<'a>,
     {
-        let (frame, frame_size) = Self::parse(
+        Self::parse(
             reader.quic_version(),
             reader.creation_time(),
             reader.last_timestamp(),
-            reader.bytes(),
-        ).map(|(frame, remaining)| (frame, reader.remaining() - remaining.len()))?;
-
-        reader.advance(frame_size);
-
-        Ok(frame)
+            payload,
+        )
     }
 }
 
 impl<'a> WriteFrame<'a> for QuicAckFrame {
     type Error = Error;
 
-    fn write_frame<E, W>(&self, writer: &mut W) -> Result<usize, Self::Error>
+    fn frame_size<W>(&self, writer: &W) -> usize
+    where
+        W: QuicFrameWriter<'a>,
+    {
+        self.size(writer.quic_version())
+    }
+
+    fn write_frame<E, W, B>(&self, writer: &W, buf: &mut B) -> Result<usize, Self::Error>
     where
         E: ByteOrder,
         W: QuicFrameWriter<'a>,
+        B: BufMut,
     {
-        self.write_to::<E, W>(writer.quic_version(), writer.creation_time(), writer)
+        self.write_to::<E, B>(writer.quic_version(), writer.creation_time(), buf)
     }
 }
 
@@ -131,7 +135,7 @@ impl QuicAckFrame {
         }
     }
 
-    pub fn frame_size(&self, quic_version: QuicVersion) -> usize {
+    pub fn size(&self, quic_version: QuicVersion) -> usize {
         // Frame Type:
         kQuicFrameTypeSize +
         // Largest Acked
@@ -144,13 +148,7 @@ impl QuicAckFrame {
         self.timestamps_size()
     }
 
-    fn write_frame<T>(
-        &self,
-        quic_version: QuicVersion,
-        creation_time: QuicTime,
-        _header: &QuicPacketHeader,
-        buf: &mut T,
-    ) -> Result<usize, Error>
+    fn write_frame<T>(&self, quic_version: QuicVersion, creation_time: QuicTime, buf: &mut T) -> Result<usize, Error>
     where
         T: BufMut,
     {
@@ -214,7 +212,7 @@ impl QuicAckFrame {
             }
 
             // Number of timestamps
-            if buf.remaining_mut() >= self.frame_size(quic_version) {
+            if buf.remaining_mut() >= self.size(quic_version) {
                 buf.put_u8(self.received_packet_times.as_ref().map_or(0, |v| v.len()) as u8);
             } else {
                 buf.put_u8(0);
@@ -264,7 +262,7 @@ impl QuicAckFrame {
         // Ack blocks.
         if quic_version <= QuicVersion::QUIC_VERSION_39 {
             // Number of timestamps
-            if buf.remaining_mut() >= self.frame_size(quic_version) {
+            if buf.remaining_mut() >= self.size(quic_version) {
                 buf.put_u8(self.received_packet_times.as_ref().map_or(0, |v| v.len()) as u8);
             } else {
                 buf.put_u8(0);
@@ -472,6 +470,8 @@ impl PacketNumberQueue {
 mod tests {
     use time;
 
+    use frames::mocks;
+
     use super::*;
 
     const kSmallLargestObserved: QuicPacketNumber = 0x1234;
@@ -531,9 +531,6 @@ mod tests {
             ),
         ];
 
-        let header = QuicPacketHeader::default();
-        let creation_time = time::now().to_timespec();
-        let last_timestamp = QuicTimeDelta::zero();
         let ack_frame = QuicAckFrame {
             largest_observed: kSmallLargestObserved,
             ack_delay_time: QuicTimeDelta::zero(),
@@ -544,15 +541,17 @@ mod tests {
         };
 
         for &(quic_version, payload) in test_cases {
+            let (reader, writer) = mocks::pair(quic_version);
+
             assert_eq!(
-                ack_frame.frame_size(quic_version),
+                ack_frame.frame_size(&writer),
                 payload.len(),
                 "calculate ACK frame size: {:?}, version {:?}",
                 ack_frame,
                 quic_version
             );
             assert_eq!(
-                QuicAckFrame::parse(quic_version, creation_time, last_timestamp, payload).unwrap(),
+                reader.read_frame::<QuicAckFrame>(payload).unwrap(),
                 (ack_frame.clone(), &[][..]),
                 "parse ACK frame, version {:?}",
                 quic_version,
@@ -561,9 +560,7 @@ mod tests {
             let mut buf = Vec::with_capacity(payload.len());
 
             assert_eq!(
-                ack_frame
-                    .write_frame(quic_version, creation_time, &header, &mut buf)
-                    .unwrap(),
+                writer.write_frame(&ack_frame, &mut buf).unwrap(),
                 buf.len(),
                 "write ACK frame {:?}, version {:?}",
                 ack_frame,
@@ -697,9 +694,6 @@ mod tests {
             ),
         ];
 
-        let header = QuicPacketHeader::default();
-        let creation_time = time::now().to_timespec();
-        let last_timestamp = QuicTimeDelta::zero();
         let ack_frame = QuicAckFrame {
             largest_observed: kLargeLargestObserved,
             ack_delay_time: QuicTimeDelta::zero(),
@@ -715,15 +709,17 @@ mod tests {
         };
 
         for &(quic_version, payload) in test_cases {
+            let (reader, writer) = mocks::pair(quic_version);
+
             assert_eq!(
-                ack_frame.frame_size(quic_version),
+                ack_frame.frame_size(&writer),
                 payload.len(),
                 "calculate ACK frame size: {:?}, version {:?}",
                 ack_frame,
                 quic_version
             );
             assert_eq!(
-                QuicAckFrame::parse(quic_version, creation_time, last_timestamp, payload).unwrap(),
+                reader.read_frame::<QuicAckFrame>(payload).unwrap(),
                 (ack_frame.clone(), &[][..]),
                 "parse ACK frame with one ack block, version {:?}",
                 quic_version,
@@ -732,9 +728,7 @@ mod tests {
             let mut buf = Vec::with_capacity(payload.len());
 
             assert_eq!(
-                ack_frame
-                    .write_frame(quic_version, creation_time, &header, &mut buf)
-                    .unwrap(),
+                writer.write_frame(&ack_frame, &mut buf).unwrap(),
                 buf.len(),
                 "write ACK frame {:?}, version {:?}",
                 ack_frame,
@@ -880,43 +874,42 @@ mod tests {
             ),
         ];
 
-        let header = QuicPacketHeader::default();
-        let creation_time = time::now().to_timespec();
-        let last_timestamp = QuicTimeDelta::zero();
-        let ack_frame = QuicAckFrame {
-            largest_observed: kSmallLargestObserved,
-            ack_delay_time: QuicTimeDelta::zero(),
-            received_packet_times: Some(vec![
-                (
-                    kSmallLargestObserved - 1,
-                    creation_time + Duration::microseconds(0x76543210),
-                ),
-                (
-                    kSmallLargestObserved - 2,
-                    creation_time + Duration::microseconds(0x76543210)
-                        + Duration::microseconds(i64::from(UFloat16::from(0x3210))),
-                ),
-            ]),
-            packets: PacketNumberQueue {
-                ranges: vec![
-                    (kSmallLargestObserved, kSmallLargestObserved + 1),
-                    (900, kSmallLargestObserved - 1),
-                    (10, 500),
-                    (1, 5),
-                ],
-            },
-        };
-
         for &(quic_version, payload) in test_cases {
+            let (reader, writer) = mocks::pair(quic_version);
+
+            let ack_frame = QuicAckFrame {
+                largest_observed: kSmallLargestObserved,
+                ack_delay_time: QuicTimeDelta::zero(),
+                received_packet_times: Some(vec![
+                    (
+                        kSmallLargestObserved - 1,
+                        reader.creation_time() + Duration::microseconds(0x76543210),
+                    ),
+                    (
+                        kSmallLargestObserved - 2,
+                        reader.creation_time() + Duration::microseconds(0x76543210)
+                            + Duration::microseconds(i64::from(UFloat16::from(0x3210))),
+                    ),
+                ]),
+                packets: PacketNumberQueue {
+                    ranges: vec![
+                        (kSmallLargestObserved, kSmallLargestObserved + 1),
+                        (900, kSmallLargestObserved - 1),
+                        (10, 500),
+                        (1, 5),
+                    ],
+                },
+            };
+
             assert_eq!(
-                ack_frame.frame_size(quic_version),
+                ack_frame.frame_size(&writer),
                 payload.len(),
                 "calculate ACK frame size: {:?}, version {:?}",
                 ack_frame,
                 quic_version
             );
             assert_eq!(
-                QuicAckFrame::parse(quic_version, creation_time, last_timestamp, payload).unwrap(),
+                reader.read_frame::<QuicAckFrame>(payload).unwrap(),
                 (ack_frame.clone(), &[][..]),
                 "parse ACK frame with one ack block, version {:?}",
                 quic_version,
@@ -925,9 +918,7 @@ mod tests {
             let mut buf = Vec::with_capacity(payload.len());
 
             assert_eq!(
-                ack_frame
-                    .write_frame(quic_version, creation_time, &header, &mut buf)
-                    .unwrap(),
+                writer.write_frame(&ack_frame, &mut buf).unwrap(),
                 buf.len(),
                 "write ACK frame {:?}, version {:?}",
                 ack_frame,

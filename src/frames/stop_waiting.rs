@@ -5,8 +5,8 @@ use nom::IResult;
 
 use constants::kQuicFrameTypeSize;
 use errors::QuicError;
-use frames::{FromWire, ToWire};
-use packet::{QuicPacketHeader, QuicPacketNumberLength};
+use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
+use packet::QuicPacketNumberLength;
 use types::{QuicFrameType, QuicPacketNumber, QuicVersion};
 
 /// The `STOP_WAITING` frame is sent to inform the peer
@@ -19,20 +19,20 @@ pub struct QuicStopWaitingFrame {
     least_unacked: QuicPacketNumber,
 }
 
-impl<'a> FromWire<'a> for QuicStopWaitingFrame {
+impl<'a> ReadFrame<'a> for QuicStopWaitingFrame {
     type Frame = QuicStopWaitingFrame;
     type Error = Error;
 
-    fn parse(
-        quic_version: QuicVersion,
-        header: &QuicPacketHeader,
-        payload: &'a [u8],
-    ) -> Result<(Self::Frame, &'a [u8]), Self::Error> {
+    fn read_frame<E, R>(reader: &R, payload: &'a [u8]) -> Result<(Self::Frame, &'a [u8]), Self::Error>
+    where
+        E: ByteOrder,
+        R: QuicFrameReader<'a>,
+    {
         match parse_quic_blocked_frame(
             payload,
-            quic_version,
-            header.public_header.packet_number_length,
-            header.packet_number,
+            reader.quic_version(),
+            reader.packet_header().public_header.packet_number_length,
+            reader.packet_header().packet_number,
         ) {
             IResult::Done(remaining, frame) => Ok((frame, remaining)),
             IResult::Incomplete(needed) => bail!(QuicError::IncompletePacket(needed)),
@@ -41,28 +41,27 @@ impl<'a> FromWire<'a> for QuicStopWaitingFrame {
     }
 }
 
-impl ToWire for QuicStopWaitingFrame {
-    type Frame = QuicStopWaitingFrame;
+impl<'a> WriteFrame<'a> for QuicStopWaitingFrame {
     type Error = Error;
 
-    fn frame_size(&self, _quic_version: QuicVersion, header: &QuicPacketHeader) -> usize {
+    fn frame_size<W>(&self, writer: &W) -> usize
+    where
+        W: QuicFrameWriter<'a>,
+    {
         // Frame Type
         kQuicFrameTypeSize +
         // Least Unacked Delta
-        header.public_header.packet_number_length as usize
+        writer.packet_header().public_header.packet_number_length as usize
     }
 
-    fn write_to<E, T>(
-        &self,
-        quic_version: QuicVersion,
-        header: &QuicPacketHeader,
-        buf: &mut T,
-    ) -> Result<usize, Self::Error>
+    fn write_frame<E, W, B>(&self, writer: &W, buf: &mut B) -> Result<usize, Self::Error>
     where
         E: ByteOrder,
-        T: BufMut,
+        W: QuicFrameWriter<'a>,
+        B: BufMut,
     {
-        let frame_size = self.frame_size(quic_version, header);
+        let frame_size = self.frame_size(writer);
+        let packet_header = writer.packet_header();
 
         if buf.remaining_mut() < frame_size {
             bail!(QuicError::NotEnoughBuffer(frame_size))
@@ -72,8 +71,8 @@ impl ToWire for QuicStopWaitingFrame {
         buf.put_u8(QuicFrameType::StopWaiting as u8);
         // Least Unacked Delta
         buf.put_uint::<E>(
-            header.packet_number - self.least_unacked,
-            header.public_header.packet_number_length as usize,
+            packet_header.packet_number - self.least_unacked,
+            packet_header.public_header.packet_number_length as usize,
         );
 
         Ok(frame_size)
@@ -100,7 +99,9 @@ named_args!(
 
 #[cfg(test)]
 mod tests {
+    use frames::mocks;
     use packet::{PACKET_6BYTE_PACKET_NUMBER, QuicPacketPublicHeader};
+    use packet::QuicPacketHeader;
 
     use super::*;
 
@@ -146,12 +147,11 @@ mod tests {
         };
 
         for &(quic_version, payload) in test_cases {
+            let (reader, writer) = mocks::pair_with_header(quic_version, header.clone());
+
+            assert_eq!(stop_waiting_frame.frame_size(&writer), payload.len());
             assert_eq!(
-                stop_waiting_frame.frame_size(quic_version, &header),
-                payload.len()
-            );
-            assert_eq!(
-                QuicStopWaitingFrame::parse(quic_version, &header, payload).unwrap(),
+                reader.read_frame::<QuicStopWaitingFrame>(payload).unwrap(),
                 (stop_waiting_frame.clone(), &[][..]),
                 "parse blocked frame, version {:?}",
                 quic_version,
@@ -160,9 +160,7 @@ mod tests {
             let mut buf = Vec::with_capacity(payload.len());
 
             assert_eq!(
-                stop_waiting_frame
-                    .write_frame(quic_version, &header, &mut buf)
-                    .unwrap(),
+                writer.write_frame(&stop_waiting_frame, &mut buf).unwrap(),
                 buf.len()
             );
             assert_eq!(&buf, &payload);

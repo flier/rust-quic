@@ -9,8 +9,7 @@ use nom::{self, IResult, Needed};
 
 use constants::{kQuicFrameTypeSize, kQuicFrameTypeStreamMask, kQuicFrameTypeStreamMask_Pre40};
 use errors::QuicError::{self, IncompletePacket};
-use frames::{FromWire, ToWire};
-use packet::QuicPacketHeader;
+use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
 use types::{QuicStreamId, QuicStreamOffset, QuicVersion};
 
 // Stream type format is 11FSSOOD.
@@ -51,15 +50,41 @@ pub struct QuicStreamFrame<'a> {
     pub data: Option<&'a [u8]>,
 }
 
-impl<'a> FromWire<'a> for QuicStreamFrame<'a> {
+impl<'a> ReadFrame<'a> for QuicStreamFrame<'a> {
     type Frame = QuicStreamFrame<'a>;
     type Error = Error;
 
-    fn parse(
-        quic_version: QuicVersion,
-        _header: &QuicPacketHeader,
-        payload: &'a [u8],
-    ) -> Result<(Self::Frame, &'a [u8]), Self::Error> {
+    fn read_frame<E, R>(reader: &R, payload: &'a [u8]) -> Result<(QuicStreamFrame<'a>, &'a [u8]), Self::Error>
+    where
+        E: ByteOrder,
+        R: QuicFrameReader<'a>,
+    {
+        Self::parse(reader.quic_version(), payload)
+    }
+}
+
+impl<'a> WriteFrame<'a> for QuicStreamFrame<'a> {
+    type Error = Error;
+
+    fn frame_size<W>(&self, writer: &W) -> usize
+    where
+        W: QuicFrameWriter<'a>,
+    {
+        self.size(writer.quic_version())
+    }
+
+    fn write_frame<E, W, B>(&self, writer: &W, buf: &mut B) -> Result<usize, Self::Error>
+    where
+        E: ByteOrder,
+        W: QuicFrameWriter<'a>,
+        B: BufMut,
+    {
+        self.write_to::<E, B>(writer.quic_version(), buf)
+    }
+}
+
+impl<'a> QuicStreamFrame<'a> {
+    pub fn parse(quic_version: QuicVersion, payload: &'a [u8]) -> Result<(QuicStreamFrame<'a>, &'a [u8]), Error> {
         if let Some((&frame_type, remaining)) = payload.split_first() {
             let (stream_id_length, offset_length, has_data_length, fin) = if quic_version < QuicVersion::QUIC_VERSION_40
             {
@@ -132,13 +157,8 @@ impl<'a> FromWire<'a> for QuicStreamFrame<'a> {
             bail!(IncompletePacket(Needed::Size(1)).context("incomplete data frame."))
         }
     }
-}
 
-impl<'a> ToWire for QuicStreamFrame<'a> {
-    type Frame = QuicStreamFrame<'a>;
-    type Error = Error;
-
-    fn frame_size(&self, quic_version: QuicVersion, _header: &QuicPacketHeader) -> usize {
+    fn size(&self, quic_version: QuicVersion) -> usize {
         // Frame Type
         kQuicFrameTypeSize +
         // Stream ID
@@ -151,17 +171,12 @@ impl<'a> ToWire for QuicStreamFrame<'a> {
             .map_or(0, |data| mem::size_of::<u16>() + data.len())
     }
 
-    fn write_to<E, T>(
-        &self,
-        quic_version: QuicVersion,
-        header: &QuicPacketHeader,
-        buf: &mut T,
-    ) -> Result<usize, Self::Error>
+    fn write_to<E, T>(&self, quic_version: QuicVersion, buf: &mut T) -> Result<usize, Error>
     where
         E: ByteOrder,
         T: BufMut,
     {
-        let frame_size = self.frame_size(quic_version, header);
+        let frame_size = self.size(quic_version);
 
         if buf.remaining_mut() < frame_size {
             bail!(QuicError::NotEnoughBuffer(frame_size))
@@ -280,6 +295,8 @@ fn stream_offset_size(quic_verion: QuicVersion, stream_offset: QuicStreamOffset)
 
 #[cfg(test)]
 mod tests {
+    use frames::mocks;
+
     use super::*;
 
     const kStreamId: QuicStreamId = 0x01020304;
@@ -345,7 +362,6 @@ mod tests {
             ),
         ];
 
-        let header = QuicPacketHeader::default();
         let stream_frame = QuicStreamFrame {
             stream_id: kStreamId,
             offset: kStreamOffset,
@@ -354,12 +370,11 @@ mod tests {
         };
 
         for &(quic_version, payload) in test_cases {
+            let (reader, writer) = mocks::pair(quic_version);
+
+            assert_eq!(stream_frame.frame_size(&writer), payload.len());
             assert_eq!(
-                stream_frame.frame_size(quic_version, &header),
-                payload.len()
-            );
-            assert_eq!(
-                QuicStreamFrame::parse(quic_version, &header, payload).unwrap(),
+                reader.read_frame::<QuicStreamFrame>(payload).unwrap(),
                 (stream_frame.clone(), &[][..]),
                 "parse stream frame, version {:?}",
                 quic_version,
@@ -368,9 +383,7 @@ mod tests {
             let mut buf = Vec::with_capacity(payload.len());
 
             assert_eq!(
-                stream_frame
-                    .write_frame(quic_version, &header, &mut buf)
-                    .unwrap(),
+                writer.write_frame(&stream_frame, &mut buf).unwrap(),
                 buf.len()
             );
             assert_eq!(

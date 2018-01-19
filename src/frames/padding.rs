@@ -5,7 +5,7 @@ use nom::Needed;
 
 use constants::kQuicFrameTypeSize;
 use errors::QuicError;
-use frames::{FromWire, ToWire};
+use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
 use packet::QuicPacketHeader;
 use types::{QuicFrameType, QuicVersion};
 
@@ -21,18 +21,18 @@ pub struct QuicPaddingFrame {
     pub num_padding_bytes: isize,
 }
 
-impl<'a> FromWire<'a> for QuicPaddingFrame {
+impl<'a> ReadFrame<'a> for QuicPaddingFrame {
     type Frame = QuicPaddingFrame;
     type Error = Error;
 
-    fn parse(
-        quic_version: QuicVersion,
-        _header: &QuicPacketHeader,
-        payload: &'a [u8],
-    ) -> Result<(Self::Frame, &'a [u8]), Self::Error> {
+    fn read_frame<E, R>(reader: &R, payload: &'a [u8]) -> Result<(Self::Frame, &'a [u8]), Self::Error>
+    where
+        E: ByteOrder,
+        R: QuicFrameReader<'a>,
+    {
         match payload.split_first() {
             Some((&frame_type, remaining)) if frame_type == QuicFrameType::Padding as u8 => {
-                let num_padding_bytes = if quic_version < QuicVersion::QUIC_VERSION_37 {
+                let num_padding_bytes = if reader.quic_version() < QuicVersion::QUIC_VERSION_37 {
                     remaining.len()
                 } else {
                     remaining.iter().take_while(|&&b| b == 0).count()
@@ -53,28 +53,26 @@ impl<'a> FromWire<'a> for QuicPaddingFrame {
     }
 }
 
-impl ToWire for QuicPaddingFrame {
-    type Frame = QuicPaddingFrame;
+impl<'a> WriteFrame<'a> for QuicPaddingFrame {
     type Error = Error;
 
-    fn frame_size(&self, _quic_version: QuicVersion, _header: &QuicPacketHeader) -> usize {
+    fn frame_size<W>(&self, _writer: &W) -> usize
+    where
+        W: QuicFrameWriter<'a>,
+    {
         // Frame Type
         kQuicFrameTypeSize +
         // Padding Bytes
         self.num_padding_bytes as usize
     }
 
-    fn write_to<E, T>(
-        &self,
-        quic_version: QuicVersion,
-        header: &QuicPacketHeader,
-        buf: &mut T,
-    ) -> Result<usize, Self::Error>
+    fn write_frame<E, W, B>(&self, writer: &W, buf: &mut B) -> Result<usize, Self::Error>
     where
         E: ByteOrder,
-        T: BufMut,
+        W: QuicFrameWriter<'a>,
+        B: BufMut,
     {
-        let frame_size = self.frame_size(quic_version, header);
+        let frame_size = self.frame_size(writer);
 
         if buf.remaining_mut() < frame_size {
             bail!(QuicError::NotEnoughBuffer(frame_size))
@@ -91,6 +89,8 @@ impl ToWire for QuicPaddingFrame {
 
 #[cfg(test)]
 mod tests {
+    use frames::mocks;
+
     use super::*;
 
     #[test]
@@ -145,28 +145,23 @@ mod tests {
             )
         ];
 
-        let header = QuicPacketHeader::default();
-
         for &(quic_version, num_padding_bytes, payload) in test_cases {
+            let (reader, writer) = mocks::pair(quic_version);
             let padding_frame = QuicPaddingFrame { num_padding_bytes };
 
             assert_eq!(
-                padding_frame.frame_size(quic_version, &header),
+                padding_frame.frame_size(&writer),
                 1 + num_padding_bytes as usize
             );
             assert_eq!(
-                QuicPaddingFrame::parse(quic_version, &header, payload)
-                    .unwrap()
-                    .0,
+                reader.read_frame::<QuicPaddingFrame>(payload).unwrap().0,
                 padding_frame
             );
 
             let mut buf = Vec::with_capacity(payload.len());
 
             assert_eq!(
-                padding_frame
-                    .write_frame(quic_version, &header, &mut buf)
-                    .unwrap(),
+                writer.write_frame(&padding_frame, &mut buf).unwrap(),
                 buf.len()
             );
             assert!(buf.into_iter().all(|b| b == 0));

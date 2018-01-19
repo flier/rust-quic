@@ -7,8 +7,7 @@ use nom::IResult;
 
 use constants::kQuicFrameTypeSize;
 use errors::QuicError;
-use frames::{FromWire, ToWire};
-use packet::QuicPacketHeader;
+use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
 use types::{QuicFrameType, QuicStreamId, QuicVersion};
 
 /// The `BLOCKED` frame is used to indicate to the remote endpoint
@@ -22,16 +21,16 @@ pub struct QuicBlockedFrame {
     stream_id: QuicStreamId,
 }
 
-impl<'a> FromWire<'a> for QuicBlockedFrame {
+impl<'a> ReadFrame<'a> for QuicBlockedFrame {
     type Frame = QuicBlockedFrame;
     type Error = Error;
 
-    fn parse(
-        quic_version: QuicVersion,
-        _header: &QuicPacketHeader,
-        payload: &'a [u8],
-    ) -> Result<(Self::Frame, &'a [u8]), Self::Error> {
-        match parse_quic_blocked_frame(payload, quic_version) {
+    fn read_frame<E, R>(reader: &R, payload: &'a [u8]) -> Result<(Self::Frame, &'a [u8]), Self::Error>
+    where
+        E: ByteOrder,
+        R: QuicFrameReader<'a>,
+    {
+        match parse_quic_blocked_frame(payload, reader.quic_version()) {
             IResult::Done(remaining, frame) => Ok((frame, remaining)),
             IResult::Incomplete(needed) => bail!(QuicError::IncompletePacket(needed)),
             IResult::Error(err) => bail!(QuicError::from(err)),
@@ -39,28 +38,26 @@ impl<'a> FromWire<'a> for QuicBlockedFrame {
     }
 }
 
-impl ToWire for QuicBlockedFrame {
-    type Frame = QuicBlockedFrame;
+impl<'a> WriteFrame<'a> for QuicBlockedFrame {
     type Error = Error;
 
-    fn frame_size(&self, _quic_version: QuicVersion, _header: &QuicPacketHeader) -> usize {
+    fn frame_size<W>(&self, _writer: &W) -> usize
+    where
+        W: QuicFrameWriter<'a>,
+    {
         // Frame Type
         kQuicFrameTypeSize +
         // Stream ID
         mem::size_of::<QuicStreamId>()
     }
 
-    fn write_to<E, T>(
-        &self,
-        quic_version: QuicVersion,
-        header: &QuicPacketHeader,
-        buf: &mut T,
-    ) -> Result<usize, Self::Error>
+    fn write_frame<E, W, B>(&self, writer: &W, buf: &mut B) -> Result<usize, Self::Error>
     where
         E: ByteOrder,
-        T: BufMut,
+        W: QuicFrameWriter<'a>,
+        B: BufMut,
     {
-        let frame_size = self.frame_size(quic_version, header);
+        let frame_size = self.frame_size(writer);
 
         if buf.remaining_mut() < frame_size {
             bail!(QuicError::NotEnoughBuffer(frame_size))
@@ -89,6 +86,8 @@ named_args!(
 
 #[cfg(test)]
 mod tests {
+    use frames::mocks;
+
     use super::*;
 
     const kStreamId: QuicStreamId = 0x01020304;
@@ -117,18 +116,16 @@ mod tests {
             ),
         ];
 
-        let header = QuicPacketHeader::default();
         let blocked_frame = QuicBlockedFrame {
             stream_id: kStreamId,
         };
 
         for &(quic_version, payload) in test_cases {
+            let (reader, writer) = mocks::pair(quic_version);
+
+            assert_eq!(blocked_frame.frame_size(&writer), payload.len());
             assert_eq!(
-                blocked_frame.frame_size(quic_version, &header),
-                payload.len()
-            );
-            assert_eq!(
-                QuicBlockedFrame::parse(quic_version, &header, payload).unwrap(),
+                reader.read_frame::<QuicBlockedFrame>(payload).unwrap(),
                 (blocked_frame.clone(), &[][..]),
                 "parse blocked frame, version {:?}",
                 quic_version,
@@ -137,9 +134,7 @@ mod tests {
             let mut buf = Vec::with_capacity(payload.len());
 
             assert_eq!(
-                blocked_frame
-                    .write_frame(quic_version, &header, &mut buf)
-                    .unwrap(),
+                writer.write_frame(&blocked_frame, &mut buf).unwrap(),
                 buf.len()
             );
             assert_eq!(&buf, &payload);

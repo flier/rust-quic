@@ -6,7 +6,7 @@ use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 use byteorder::{ByteOrder, NativeEndian, NetworkEndian};
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{BufMut, Bytes};
 use failure::{Error, ResultExt};
 use nom::{IResult, le_u16};
 
@@ -447,13 +447,17 @@ where
         self.largest_packet_number = cmp::max(self.largest_packet_number, header.packet_number);
     }
 
-    fn process_frame_data(&self, header: &QuicPacketHeader, mut payload: &[u8]) -> Result<(), Error> {
-        let mut reader = FrameReader::new(self, header, payload);
+    fn process_frame_data(&self, header: &QuicPacketHeader, data: &[u8]) -> Result<(), Error> {
+        let reader = FrameReader {
+            framer: self,
+            header,
+        };
+        let mut payload = data;
 
         while let Some(&frame_type) = payload.first() {
             match QuicFrameType::with_version(self.quic_version, frame_type)? {
                 QuicFrameType::Padding => {
-                    let (frame, remaining) = QuicPaddingFrame::parse(self.quic_version, header, payload)?;
+                    let (frame, remaining) = reader.read_frame::<QuicPaddingFrame>(payload)?;
 
                     debug!("parsed frame: {:?}", frame);
 
@@ -466,7 +470,7 @@ where
                     payload = remaining;
                 }
                 QuicFrameType::ResetStream => {
-                    let (frame, remaining) = QuicRstStreamFrame::parse(self.quic_version, header, payload)?;
+                    let (frame, remaining) = reader.read_frame::<QuicRstStreamFrame>(payload)?;
 
                     debug!("parsed frame: {:?}", frame);
 
@@ -479,7 +483,7 @@ where
                     payload = remaining;
                 }
                 QuicFrameType::ConnectionClose => {
-                    let (frame, remaining) = QuicConnectionCloseFrame::parse(self.quic_version, header, payload)?;
+                    let (frame, remaining) = reader.read_frame::<QuicConnectionCloseFrame>(payload)?;
 
                     debug!("parsed frame: {:?}", frame);
 
@@ -492,7 +496,7 @@ where
                     payload = remaining;
                 }
                 QuicFrameType::GoAway => {
-                    let (frame, remaining) = QuicGoAwayFrame::parse(self.quic_version, header, payload)?;
+                    let (frame, remaining) = reader.read_frame::<QuicGoAwayFrame>(payload)?;
 
                     debug!("parsed frame: {:?}", frame);
 
@@ -505,7 +509,7 @@ where
                     payload = remaining;
                 }
                 QuicFrameType::WindowUpdate => {
-                    let (frame, remaining) = QuicWindowUpdateFrame::parse(self.quic_version, header, payload)?;
+                    let (frame, remaining) = reader.read_frame::<QuicWindowUpdateFrame>(payload)?;
 
                     debug!("parsed frame: {:?}", frame);
 
@@ -518,7 +522,7 @@ where
                     payload = remaining;
                 }
                 QuicFrameType::Blocked => {
-                    let (frame, remaining) = QuicBlockedFrame::parse(self.quic_version, header, payload)?;
+                    let (frame, remaining) = reader.read_frame::<QuicBlockedFrame>(payload)?;
 
                     debug!("parsed frame: {:?}", frame);
 
@@ -531,7 +535,7 @@ where
                     payload = remaining;
                 }
                 QuicFrameType::StopWaiting => {
-                    let (frame, remaining) = QuicStopWaitingFrame::parse(self.quic_version, header, payload)?;
+                    let (frame, remaining) = reader.read_frame::<QuicStopWaitingFrame>(payload)?;
 
                     debug!("parsed frame: {:?}", frame);
 
@@ -557,7 +561,7 @@ where
                     payload = remaining;
                 }
                 QuicFrameType::Stream => {
-                    let (frame, remaining) = QuicStreamFrame::parse(self.quic_version, header, payload)?;
+                    let (frame, remaining) = reader.read_frame::<QuicStreamFrame>(payload)?;
 
                     debug!("parsed frame: {:?}", frame);
 
@@ -570,7 +574,7 @@ where
                     payload = remaining;
                 }
                 QuicFrameType::Ack => {
-                    let frame = reader.read_frame::<QuicAckFrame>()?;
+                    let (frame, remaining) = reader.read_frame::<QuicAckFrame>(payload)?;
 
                     debug!("parsed frame: {:?}", frame);
 
@@ -579,6 +583,8 @@ where
 
                         return Ok(());
                     }
+
+                    payload = remaining;
                 }
                 _ => bail!(IllegalFrameType(frame_type)),
             }
@@ -588,44 +594,16 @@ where
     }
 }
 
-struct FrameReader<'a, V>
+struct FrameReader<'a, 'p, V>
 where
     V: 'a,
+    'a: 'p,
 {
     framer: &'a QuicFramer<'a, V>,
-    header: &'a QuicPacketHeader<'a>,
-    payload: Cursor<&'a [u8]>,
+    header: &'p QuicPacketHeader<'p>,
 }
 
-impl<'a, V> FrameReader<'a, V> {
-    pub fn new(
-        framer: &'a QuicFramer<'a, V>,
-        header: &'a QuicPacketHeader<'a>,
-        payload: &'a [u8],
-    ) -> FrameReader<'a, V> {
-        FrameReader {
-            framer,
-            header,
-            payload: Cursor::new(payload),
-        }
-    }
-}
-
-impl<'a, V> Buf for FrameReader<'a, V> {
-    fn remaining(&self) -> usize {
-        self.payload.remaining()
-    }
-
-    fn bytes(&self) -> &[u8] {
-        self.payload.bytes()
-    }
-
-    fn advance(&mut self, cnt: usize) {
-        self.payload.advance(cnt)
-    }
-}
-
-impl<'a, V> QuicFrameReader<'a> for FrameReader<'a, V> {
+impl<'a, 'p, V> QuicFrameReader<'a> for FrameReader<'a, 'p, V> {
     fn packet_header(&self) -> &QuicPacketHeader {
         self.header
     }
@@ -643,16 +621,16 @@ impl<'a, V> QuicFrameReader<'a> for FrameReader<'a, V> {
     }
 }
 
-struct FrameWriter<'a, V>
+struct FrameWriter<'a, 'p, V>
 where
     V: 'a,
 {
     framer: &'a QuicFramer<'a, V>,
-    header: &'a QuicPacketHeader<'a>,
-    payload: Cursor<&'a mut [u8]>,
+    header: &'p QuicPacketHeader<'p>,
+    payload: Cursor<&'p mut [u8]>,
 }
 
-impl<'a, V> BufMut for FrameWriter<'a, V> {
+impl<'a, 'p, V> BufMut for FrameWriter<'a, 'p, V> {
     fn remaining_mut(&self) -> usize {
         self.payload.remaining_mut()
     }
@@ -666,7 +644,7 @@ impl<'a, V> BufMut for FrameWriter<'a, V> {
     }
 }
 
-impl<'a, V> QuicFrameWriter<'a> for FrameWriter<'a, V> {
+impl<'a, 'p, V> QuicFrameWriter<'a> for FrameWriter<'a, 'p, V> {
     fn packet_header(&self) -> &QuicPacketHeader {
         self.header
     }
