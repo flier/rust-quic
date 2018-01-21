@@ -4,7 +4,7 @@ use failure::Error;
 
 use frames::{QuicAckFrame, QuicBlockedFrame, QuicConnectionCloseFrame, QuicFrameReader, QuicFrameWriter,
              QuicGoAwayFrame, QuicPaddingFrame, QuicPingFrame, QuicRstStreamFrame, QuicStopWaitingFrame,
-             QuicStreamFrame, QuicWindowUpdateFrame, ReadFrame, ToWire, WriteFrame};
+             QuicStreamFrame, QuicWindowUpdateFrame, ReadFrame, WriteFrame};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum QuicFrame<'a> {
@@ -48,7 +48,7 @@ impl<'a> WriteFrame<'a> for QuicFrame<'a> {
             QuicFrame::WindowUpdate(ref win_update) => win_update.frame_size(writer),
             QuicFrame::Blocked(ref blocked) => blocked.frame_size(writer),
             QuicFrame::StopWaiting(ref stop_waiting) => stop_waiting.frame_size(writer),
-            QuicFrame::Ping(ref ping) => ping.frame_size(writer.quic_version(), writer.packet_header()),
+            QuicFrame::Ping(ref ping) => ping.frame_size(writer),
             QuicFrame::Stream(ref stream) => stream.frame_size(writer),
             QuicFrame::Ack(ref ack) => ack.frame_size(writer),
         }
@@ -68,7 +68,7 @@ impl<'a> WriteFrame<'a> for QuicFrame<'a> {
             QuicFrame::WindowUpdate(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
             QuicFrame::Blocked(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
             QuicFrame::StopWaiting(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
-            QuicFrame::Ping(ref frame) => frame.write_to::<E, B>(writer.quic_version(), writer.packet_header(), buf),
+            QuicFrame::Ping(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
             QuicFrame::Stream(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
             QuicFrame::Ack(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
         }

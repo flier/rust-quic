@@ -267,10 +267,9 @@ where
         );
 
         if message.tag() != kPRST {
-            bail!(InvalidResetPacket(format!(
-                "incorrect message tag: {}",
-                message.tag()
-            )));
+            bail!(InvalidResetPacket(
+                format!("incorrect message tag: {}", message.tag())
+            ));
         }
 
         let packet = QuicPublicResetPacket {
@@ -548,7 +547,7 @@ where
                     payload = remaining;
                 }
                 QuicFrameType::Ping => {
-                    let (frame, remaining) = QuicPingFrame::parse(self.quic_version, header, payload)?;
+                    let (frame, remaining) = reader.read_frame::<QuicPingFrame>(payload)?;
 
                     debug!("parsed frame: {:?}", frame);
 
