@@ -6,7 +6,6 @@ use nom::Needed;
 use constants::kQuicFrameTypeSize;
 use errors::QuicError;
 use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
-use packet::QuicPacketHeader;
 use types::{QuicFrameType, QuicVersion};
 
 /// The `PADDING` frame pads a packet with 0x00 bytes.
@@ -46,9 +45,9 @@ impl<'a> ReadFrame<'a> for QuicPaddingFrame {
                 ))
             }
             Some((&frame_type, _)) => bail!(QuicError::IllegalFrameType(frame_type)),
-            _ => bail!(QuicError::IncompletePacket(Needed::Size(
-                kQuicFrameTypeSize
-            ))),
+            _ => bail!(QuicError::IncompletePacket(
+                Needed::Size(kQuicFrameTypeSize)
+            )),
         }
     }
 }
