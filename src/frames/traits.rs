@@ -1,6 +1,7 @@
 use byteorder::{ByteOrder, NativeEndian, NetworkEndian};
 use bytes::BufMut;
 
+use frames::QuicFrame;
 use packet::QuicPacketHeader;
 use types::{QuicTime, QuicTimeDelta, QuicVersion};
 
@@ -62,6 +63,13 @@ where
         }
     }
 
+    fn read_frames(&'a self, payload: &'a [u8]) -> Frames<'a, Self> {
+        Frames {
+            reader: self,
+            payload,
+        }
+    }
+
     fn packet_header(&self) -> &QuicPacketHeader;
 
     fn quic_version(&self) -> QuicVersion;
@@ -69,6 +77,40 @@ where
     fn creation_time(&self) -> QuicTime;
 
     fn last_timestamp(&self) -> QuicTimeDelta;
+}
+
+pub struct Frames<'a, R>
+where
+    R: 'a + QuicFrameReader<'a>,
+{
+    reader: &'a R,
+    payload: &'a [u8],
+}
+
+impl<'a, R> Iterator for Frames<'a, R>
+where
+    R: 'a + QuicFrameReader<'a>,
+{
+    type Item = Result<QuicFrame<'a>, <QuicFrame<'a> as ReadFrame<'a>>::Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.payload.is_empty() {
+            match self.reader.read_frame::<QuicFrame<'a>>(self.payload) {
+                Ok((frame, remaining)) => {
+                    self.payload = remaining;
+
+                    Some(Ok(frame))
+                }
+                Err(err) => {
+                    self.payload = &[][..];
+
+                    Some(Err(err))
+                }
+            }
+        } else {
+            None
+        }
+    }
 }
 
 pub trait QuicFrameWriter<'a>
@@ -85,6 +127,21 @@ where
         } else {
             frame.write_frame::<NativeEndian, Self, B>(self, buf)
         }
+    }
+
+    fn write_frames<I, F, B>(&self, frames: I, buf: &mut B) -> Result<usize, F::Error>
+    where
+        I: IntoIterator<Item = F>,
+        F: WriteFrame<'a>,
+        B: BufMut,
+    {
+        let mut wrote = 0;
+
+        for frame in frames {
+            wrote += self.write_frame(&frame, buf)?;
+        }
+
+        Ok(wrote)
     }
 
     fn packet_header(&self) -> &QuicPacketHeader;

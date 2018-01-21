@@ -3,7 +3,7 @@ use bytes::BufMut;
 use failure::Error;
 use nom::Needed;
 
-use errors::QuicError::{IllegalFrameType, IncompletePacket};
+use errors::QuicError::IncompletePacket;
 use frames::{QuicAckFrame, QuicBlockedFrame, QuicConnectionCloseFrame, QuicFrameReader, QuicFrameWriter,
              QuicGoAwayFrame, QuicPaddingFrame, QuicPingFrame, QuicRstStreamFrame, QuicStopWaitingFrame,
              QuicStreamFrame, QuicWindowUpdateFrame, ReadFrame, WriteFrame};
