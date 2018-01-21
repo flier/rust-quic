@@ -1,10 +1,13 @@
 use byteorder::ByteOrder;
 use bytes::BufMut;
 use failure::Error;
+use nom::Needed;
 
+use errors::QuicError::{IllegalFrameType, IncompletePacket};
 use frames::{QuicAckFrame, QuicBlockedFrame, QuicConnectionCloseFrame, QuicFrameReader, QuicFrameWriter,
              QuicGoAwayFrame, QuicPaddingFrame, QuicPingFrame, QuicRstStreamFrame, QuicStopWaitingFrame,
              QuicStreamFrame, QuicWindowUpdateFrame, ReadFrame, WriteFrame};
+use types::QuicFrameType;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum QuicFrame<'a> {
@@ -29,7 +32,51 @@ impl<'a> ReadFrame<'a> for QuicFrame<'a> {
         E: ByteOrder,
         R: QuicFrameReader<'a>,
     {
-        unreachable!()
+        if let Some(&frame_type) = payload.first() {
+            match QuicFrameType::with_version(reader.quic_version(), frame_type)? {
+                QuicFrameType::Padding => reader
+                    .read_frame::<QuicPaddingFrame>(payload)
+                    .map(|(frame, remaining)| (QuicFrame::Padding(frame), remaining)),
+
+                QuicFrameType::ResetStream => reader.read_frame::<QuicRstStreamFrame>(payload).map(
+                    |(frame, remaining)| (QuicFrame::ResetStream(frame), remaining),
+                ),
+
+                QuicFrameType::ConnectionClose => reader.read_frame::<QuicConnectionCloseFrame>(payload).map(
+                    |(frame, remaining)| (QuicFrame::ConnectionClose(frame), remaining),
+                ),
+
+                QuicFrameType::GoAway => reader
+                    .read_frame::<QuicGoAwayFrame>(payload)
+                    .map(|(frame, remaining)| (QuicFrame::GoAway(frame), remaining)),
+
+                QuicFrameType::WindowUpdate => reader.read_frame::<QuicWindowUpdateFrame>(payload).map(
+                    |(frame, remaining)| (QuicFrame::WindowUpdate(frame), remaining),
+                ),
+
+                QuicFrameType::Blocked => reader
+                    .read_frame::<QuicBlockedFrame>(payload)
+                    .map(|(frame, remaining)| (QuicFrame::Blocked(frame), remaining)),
+
+                QuicFrameType::StopWaiting => reader.read_frame::<QuicStopWaitingFrame>(payload).map(
+                    |(frame, remaining)| (QuicFrame::StopWaiting(frame), remaining),
+                ),
+
+                QuicFrameType::Ping | QuicFrameType::MtuDiscovery => reader
+                    .read_frame::<QuicPingFrame>(payload)
+                    .map(|(frame, remaining)| (QuicFrame::Ping(frame), remaining)),
+
+                QuicFrameType::Stream => reader
+                    .read_frame::<QuicStreamFrame>(payload)
+                    .map(|(frame, remaining)| (QuicFrame::Stream(frame), remaining)),
+
+                QuicFrameType::Ack => reader
+                    .read_frame::<QuicAckFrame>(payload)
+                    .map(|(frame, remaining)| (QuicFrame::Ack(frame), remaining)),
+            }
+        } else {
+            bail!(IncompletePacket(Needed::Unknown))
+        }
     }
 }
 
