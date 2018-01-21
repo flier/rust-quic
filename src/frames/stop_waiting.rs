@@ -6,8 +6,8 @@ use nom::IResult;
 use constants::kQuicFrameTypeSize;
 use errors::QuicError;
 use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
-use packet::QuicPacketNumberLength;
-use types::{QuicFrameType, QuicPacketNumber, QuicVersion};
+use proto::{QuicPacketNumber, QuicPacketNumberLength};
+use types::{QuicFrameType, QuicVersion};
 
 /// The `STOP_WAITING` frame is sent to inform the peer
 /// that it should not continue to wait for packets with packet numbers lower than a specified value.
@@ -100,8 +100,8 @@ named_args!(
 #[cfg(test)]
 mod tests {
     use frames::mocks;
-    use packet::{PACKET_6BYTE_PACKET_NUMBER, QuicPacketPublicHeader};
-    use packet::QuicPacketHeader;
+    use packet::{QuicPacketHeader, QuicPacketPublicHeader};
+    use proto::QuicPacketNumberLength;
 
     use super::*;
 
@@ -136,7 +136,7 @@ mod tests {
             public_header: QuicPacketPublicHeader {
                 reset_flag: false,
                 connection_id: None,
-                packet_number_length: PACKET_6BYTE_PACKET_NUMBER,
+                packet_number_length: QuicPacketNumberLength::PACKET_6BYTE_PACKET_NUMBER,
                 versions: None,
                 nonce: None,
             },

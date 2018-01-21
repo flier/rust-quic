@@ -13,8 +13,8 @@ use constants::{kQuicFrameTypeAckMask, kQuicFrameTypeAckMask_Pre40, kQuicFrameTy
 use errors::ParseError::*;
 use errors::QuicError::{self, IncompletePacket};
 use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
-use packet::{packet_number_flags, packet_number_length, packet_number_size, QuicPacketNumberLength};
-use types::{QuicPacketNumber, QuicTime, QuicTimeDelta, QuicVersion, ToQuicTimeDelta, UFloat16, ufloat16};
+use proto::{QuicPacketNumber, QuicPacketNumberLength, QuicPacketNumberLengthFlags};
+use types::{QuicTime, QuicTimeDelta, QuicVersion, ToQuicTimeDelta, UFloat16, ufloat16};
 
 const MAX_U8: u64 = u8::MAX as u64;
 
@@ -100,21 +100,21 @@ impl QuicAckFrame {
                     kQuicHasMultipleAckBlocksOffset
                 }
             );
-            let ack_block_length = packet_number_length(
+            let ack_block_length = QuicPacketNumberLength::from_flags(
                 quic_version,
-                extract_bits!(
+                QuicPacketNumberLengthFlags::from(extract_bits!(
                     frame_type,
                     kQuicSequenceNumberLengthNumBits,
                     kActBlockLengthOffset
-                ),
+                )),
             );
-            let largest_acked_length = packet_number_length(
+            let largest_acked_length = QuicPacketNumberLength::from_flags(
                 quic_version,
-                extract_bits!(
+                QuicPacketNumberLengthFlags::from(extract_bits!(
                     frame_type,
                     kQuicSequenceNumberLengthNumBits,
                     kLargestAckedOffset
-                ),
+                )),
             );
 
             match parse_quic_ack_frame(
@@ -139,7 +139,7 @@ impl QuicAckFrame {
         // Frame Type:
         kQuicFrameTypeSize +
         // Largest Acked
-        packet_number_size(quic_version, self.largest_observed) +
+        QuicPacketNumberLength::for_packet_number(quic_version, self.largest_observed) as usize +
         // Largest Acked Delta Time
         mem::size_of::<u16>() +
         // Ack Block
@@ -166,7 +166,7 @@ impl QuicAckFrame {
     {
         let mut frame_size = 0;
 
-        let largest_acked_length = packet_number_size(quic_version, self.largest_observed);
+        let largest_acked_length = QuicPacketNumberLength::for_packet_number(quic_version, self.largest_observed);
         let ack_block_length = self.ack_block_length(quic_version);
         let ack_blocks = self.packets.ack_blocks(self.largest_observed);
         // Number of ack blocks.
@@ -189,12 +189,12 @@ impl QuicAckFrame {
         );
         set_bits!(
             flags,
-            packet_number_flags(largest_acked_length as QuicPacketNumberLength),
+            largest_acked_length.as_flags() as u8,
             kLargestAckedOffset
         );
         set_bits!(
             flags,
-            packet_number_flags(ack_block_length as QuicPacketNumberLength),
+            ack_block_length.as_flags() as u8,
             kActBlockLengthOffset
         );
 
@@ -222,9 +222,9 @@ impl QuicAckFrame {
         }
 
         // Largest Acked
-        buf.put_uint::<E>(self.largest_observed, largest_acked_length);
+        buf.put_uint::<E>(self.largest_observed, largest_acked_length as usize);
 
-        frame_size += largest_acked_length;
+        frame_size += largest_acked_length as usize;
 
         // Largest acked delta time.
         buf.put_u16::<E>(u16::from(UFloat16::new(
@@ -247,15 +247,15 @@ impl QuicAckFrame {
 
         // First ack block length.
         if let Some((&(_, first_block_length), remaining_ack_blocks)) = ack_blocks.split_first() {
-            buf.put_uint::<E>(first_block_length, ack_block_length);
+            buf.put_uint::<E>(first_block_length, ack_block_length as usize);
 
-            frame_size += ack_block_length;
+            frame_size += ack_block_length as usize;
 
             for &(gap, block_length) in remaining_ack_blocks {
                 buf.put_u8(gap);
-                buf.put_uint::<E>(block_length, ack_block_length);
+                buf.put_uint::<E>(block_length, ack_block_length as usize);
 
-                frame_size += 1 + ack_block_length;
+                frame_size += 1 + ack_block_length as usize;
             }
         }
 
@@ -307,8 +307,8 @@ impl QuicAckFrame {
         Ok(frame_size)
     }
 
-    fn ack_block_length(&self, quic_version: QuicVersion) -> usize {
-        packet_number_size(
+    fn ack_block_length(&self, quic_version: QuicVersion) -> QuicPacketNumberLength {
+        QuicPacketNumberLength::for_packet_number(
             quic_version,
             self.packets
                 .ranges
@@ -320,7 +320,7 @@ impl QuicAckFrame {
     }
 
     fn ack_blocks_size(&self, quic_version: QuicVersion) -> usize {
-        let ack_block_length = self.ack_block_length(quic_version);
+        let ack_block_length = self.ack_block_length(quic_version) as usize;
 
         match self.packets
             .ranges

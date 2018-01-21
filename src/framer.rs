@@ -1,7 +1,6 @@
 #![allow(non_upper_case_globals)]
 
 use std::cmp;
-use std::io::Cursor;
 use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
@@ -16,11 +15,11 @@ use errors::QuicError;
 use errors::QuicError::*;
 use frames::{QuicAckFrame, QuicBlockedFrame, QuicConnectionCloseFrame, QuicFrame, QuicFrameReader, QuicFrameWriter,
              QuicGoAwayFrame, QuicPaddingFrame, QuicPingFrame, QuicRstStreamFrame, QuicStopWaitingFrame,
-             QuicStreamFrame, QuicWindowUpdateFrame, ReadFrame, WriteFrame};
+             QuicStreamFrame, QuicWindowUpdateFrame};
 use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketPublicHeader, QuicPublicResetPacket,
              QuicVersionNegotiationPacket};
-use types::{EncryptionLevel, Perspective, QuicPacketNumber, QuicTime, QuicTimeDelta, QuicVersion, ToEndianness,
-            ToQuicPacketNumber};
+use proto::QuicPacketNumber;
+use types::{EncryptionLevel, Perspective, QuicTime, QuicTimeDelta, QuicVersion, ToEndianness, ToQuicPacketNumber};
 
 pub trait QuicFramerVisitor {
     /// Called when a new packet has been received, before it has been validated or processed.
@@ -94,7 +93,10 @@ pub trait QuicFramerVisitor {
 /// Class for parsing and constructing QUIC packets.
 ///
 /// It has a `QuicFramerVisitor` that is called when packets are parsed.
-pub struct QuicFramer<'a, V> {
+pub struct QuicFramer<'a, V>
+where
+    V: 'a,
+{
     supported_versions: &'a [QuicVersion],
     quic_version: QuicVersion,
     visitor: V,
@@ -122,7 +124,10 @@ pub struct QuicFramer<'a, V> {
     last_timestamp: QuicTimeDelta,
 }
 
-impl<'a, V> QuicFramer<'a, V> {
+impl<'a, V> QuicFramer<'a, V>
+where
+    V: 'a,
+{
     pub fn new<P>(supported_versions: &'a [QuicVersion], creation_time: QuicTime, visitor: V) -> Self
     where
         P: 'static + Perspective,
@@ -185,7 +190,7 @@ impl<'a, V> QuicFramer<'a, V> {
 
 impl<'a, V> QuicFramer<'a, V>
 where
-    V: QuicFramerVisitor,
+    V: 'a + QuicFramerVisitor,
 {
     pub fn process_packet<P>(&mut self, packet: &EncryptedPacket) -> Result<(), Error>
     where
@@ -267,9 +272,10 @@ where
         );
 
         if message.tag() != kPRST {
-            bail!(InvalidResetPacket(
-                format!("incorrect message tag: {}", message.tag())
-            ));
+            bail!(InvalidResetPacket(format!(
+                "incorrect message tag: {}",
+                message.tag()
+            )));
         }
 
         let packet = QuicPublicResetPacket {
@@ -508,12 +514,28 @@ where
 
         Ok(())
     }
+
+    pub fn build_data_packet<I, B>(
+        &'a self,
+        header: &'a QuicPacketHeader<'a>,
+        frames: I,
+        buf: &mut B,
+    ) -> Result<usize, Error>
+    where
+        I: IntoIterator<Item = QuicFrame<'a>>,
+        B: BufMut,
+    {
+        let header_size = header.write_to(buf)?;
+        let frame_writer = FrameWriter::new(self, header);
+        let frames_size = frame_writer.write_frames(frames, buf)?;
+
+        Ok(header_size + frames_size)
+    }
 }
 
 struct FrameReader<'a, 'p, V>
 where
     V: 'a,
-    'a: 'p,
 {
     framer: &'a QuicFramer<'a, V>,
     header: &'p QuicPacketHeader<'p>,
@@ -547,30 +569,24 @@ impl<'a, 'p, V> QuicFrameReader<'a> for FrameReader<'a, 'p, V> {
     }
 }
 
-struct FrameWriter<'a, 'p, V>
+struct FrameWriter<'a, V>
 where
     V: 'a,
 {
     framer: &'a QuicFramer<'a, V>,
-    header: &'p QuicPacketHeader<'p>,
-    payload: Cursor<&'p mut [u8]>,
+    header: &'a QuicPacketHeader<'a>,
 }
 
-impl<'a, 'p, V> BufMut for FrameWriter<'a, 'p, V> {
-    fn remaining_mut(&self) -> usize {
-        self.payload.remaining_mut()
-    }
-
-    unsafe fn advance_mut(&mut self, cnt: usize) {
-        self.payload.advance_mut(cnt)
-    }
-
-    unsafe fn bytes_mut(&mut self) -> &mut [u8] {
-        self.payload.bytes_mut()
+impl<'a, V> FrameWriter<'a, V>
+where
+    V: 'a,
+{
+    pub fn new(framer: &'a QuicFramer<'a, V>, header: &'a QuicPacketHeader<'a>) -> FrameWriter<'a, V> {
+        FrameWriter { framer, header }
     }
 }
 
-impl<'a, 'p, V> QuicFrameWriter<'a> for FrameWriter<'a, 'p, V> {
+impl<'a, V> QuicFrameWriter<'a> for FrameWriter<'a, V> {
     fn packet_header(&self) -> &QuicPacketHeader {
         self.header
     }

@@ -4,7 +4,8 @@ use byteorder::{BigEndian, LittleEndian};
 use nom::Endianness;
 use time::Duration;
 
-use super::{QuicPacketNumber, QuicTimeDelta};
+use proto::QuicPacketNumber;
+use types::QuicTimeDelta;
 
 pub trait Perspective {
     fn is_server() -> bool;

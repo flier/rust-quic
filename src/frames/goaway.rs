@@ -8,7 +8,8 @@ use nom::IResult;
 use constants::{kQuicFrameTypeSize, kStringPieceLenSize};
 use errors::{QuicError, QuicErrorCode};
 use frames::{BufMutExt, QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
-use types::{QuicFrameType, QuicStreamId, QuicVersion};
+use proto::QuicStreamId;
+use types::{QuicFrameType, QuicVersion};
 
 /// The GOAWAY frame allows for notification that the connection should stop being used,
 /// and will likely be aborted in the future. Any active streams will continue to be processed,

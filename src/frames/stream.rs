@@ -10,7 +10,8 @@ use nom::{self, IResult, Needed};
 use constants::{kQuicFrameTypeSize, kQuicFrameTypeStreamMask, kQuicFrameTypeStreamMask_Pre40};
 use errors::QuicError::{self, IncompletePacket};
 use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
-use types::{QuicStreamId, QuicStreamOffset, QuicVersion};
+use proto::{QuicStreamId, QuicStreamOffset};
+use types::QuicVersion;
 
 // Stream type format is 11FSSOOD.
 // Stream frame relative shifts and masks for interpreting the stream flags.

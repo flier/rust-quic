@@ -5,14 +5,15 @@ use std::ops::Deref;
 use std::str::FromStr;
 
 use byteorder::ByteOrder;
-use bytes::Bytes;
+use bytes::{BufMut, Bytes};
 use failure::{Error, Fail};
 use nom::{IResult, Needed, be_u64, be_u8};
 
 use constants::{kPublicFlagsSize, kQuicVersionSize};
 use errors::QuicError::{self, IncompletePacket};
-use types::{QuicConnectionId, QuicDiversificationNonce, QuicPacketNumber, QuicPublicResetNonceProof, ToEndianness};
-use types::QuicVersion;
+use proto::{QuicConnectionId, QuicConnectionIdLength, QuicPacketNumber, QuicPacketNumberLength,
+            QuicPacketNumberLengthFlags, QuicPublicResetNonceProof};
+use types::{QuicDiversificationNonce, QuicVersion, ToEndianness};
 
 const kPublicHeaderConnectionIdSize: usize = 8;
 
@@ -20,69 +21,6 @@ const kPublicHeaderConnectionIdSize: usize = 8;
 /// of the nonce that a server may set in the packet header
 /// to ensure that its INITIAL keys are not duplicated.
 const kDiversificationNonceSize: usize = 32;
-
-pub type QuicPacketNumberLengthFlags = u8;
-
-const PACKET_FLAGS_1BYTE_PACKET: QuicPacketNumberLengthFlags = 0; // 00
-const PACKET_FLAGS_2BYTE_PACKET: QuicPacketNumberLengthFlags = 1; // 01
-const PACKET_FLAGS_4BYTE_PACKET: QuicPacketNumberLengthFlags = 1 << 1; // 10
-const PACKET_FLAGS_8BYTE_PACKET: QuicPacketNumberLengthFlags = 1 << 1 | 1; // 11
-
-pub type QuicPacketNumberLength = u8;
-
-pub const PACKET_1BYTE_PACKET_NUMBER: QuicPacketNumberLength = 1;
-pub const PACKET_2BYTE_PACKET_NUMBER: QuicPacketNumberLength = 2;
-pub const PACKET_4BYTE_PACKET_NUMBER: QuicPacketNumberLength = 4;
-// TODO(rch): Remove this when we remove QUIC_VERSION_39.
-pub const PACKET_6BYTE_PACKET_NUMBER: QuicPacketNumberLength = 6;
-pub const PACKET_8BYTE_PACKET_NUMBER: QuicPacketNumberLength = 8;
-
-pub fn packet_number_length(version: QuicVersion, flags: QuicPacketNumberLengthFlags) -> QuicPacketNumberLength {
-    match flags & PACKET_FLAGS_8BYTE_PACKET {
-        PACKET_FLAGS_8BYTE_PACKET => if version <= QuicVersion::QUIC_VERSION_39 {
-            PACKET_6BYTE_PACKET_NUMBER
-        } else {
-            PACKET_8BYTE_PACKET_NUMBER
-        },
-        PACKET_FLAGS_4BYTE_PACKET => PACKET_4BYTE_PACKET_NUMBER,
-        PACKET_FLAGS_2BYTE_PACKET => PACKET_2BYTE_PACKET_NUMBER,
-        PACKET_FLAGS_1BYTE_PACKET => PACKET_1BYTE_PACKET_NUMBER,
-        n => {
-            warn!("unexpected packet number flags: {}", n);
-
-            PACKET_6BYTE_PACKET_NUMBER
-        }
-    }
-}
-
-pub fn packet_number_flags(packet_number_length: QuicPacketNumberLength) -> QuicPacketNumberLengthFlags {
-    match packet_number_length {
-        PACKET_1BYTE_PACKET_NUMBER => PACKET_FLAGS_1BYTE_PACKET,
-        PACKET_2BYTE_PACKET_NUMBER => PACKET_FLAGS_2BYTE_PACKET,
-        PACKET_4BYTE_PACKET_NUMBER => PACKET_FLAGS_4BYTE_PACKET,
-        PACKET_6BYTE_PACKET_NUMBER | PACKET_8BYTE_PACKET_NUMBER => PACKET_FLAGS_8BYTE_PACKET,
-        n => {
-            warn!("unexpected packet number length: {}", n);
-
-            PACKET_FLAGS_8BYTE_PACKET
-        }
-    }
-}
-
-pub fn packet_number_size(quic_version: QuicVersion, packet_number: QuicPacketNumber) -> usize {
-    [
-        PACKET_1BYTE_PACKET_NUMBER,
-        PACKET_2BYTE_PACKET_NUMBER,
-        PACKET_4BYTE_PACKET_NUMBER,
-    ].into_iter()
-        .cloned()
-        .find(|&n| packet_number < (1 << (8 * n as usize)))
-        .unwrap_or(if quic_version <= QuicVersion::QUIC_VERSION_39 {
-            PACKET_6BYTE_PACKET_NUMBER
-        } else {
-            PACKET_8BYTE_PACKET_NUMBER
-        }) as usize
-}
 
 /// Number of bits the packet number length bits are shifted from the right edge of the public header.
 const kPublicHeaderSequenceNumberShift: u8 = 4;
@@ -114,10 +52,6 @@ bitflags! {
         // --01----: 2 bytes
         // --10----: 4 bytes
         // --11----: 6 bytes
-        const PACKET_PUBLIC_FLAGS_1BYTE_PACKET = PACKET_FLAGS_1BYTE_PACKET << kPublicHeaderSequenceNumberShift;
-        const PACKET_PUBLIC_FLAGS_2BYTE_PACKET = PACKET_FLAGS_2BYTE_PACKET << kPublicHeaderSequenceNumberShift;
-        const PACKET_PUBLIC_FLAGS_4BYTE_PACKET = PACKET_FLAGS_4BYTE_PACKET << kPublicHeaderSequenceNumberShift;
-        const PACKET_PUBLIC_FLAGS_6BYTE_PACKET = PACKET_FLAGS_8BYTE_PACKET << kPublicHeaderSequenceNumberShift;
 
         // Reserved, unimplemented flags:
 
@@ -143,7 +77,7 @@ impl<'a> QuicPacketPublicHeader<'a> {
     where
         E: ByteOrder + ToEndianness,
     {
-        match public_header(buf, is_server) {
+        match parse_public_header(buf, is_server) {
             IResult::Done(remaining, header) => Ok((remaining, header)),
             IResult::Incomplete(needed) => bail!(IncompletePacket(needed).context("incomplete public header.")),
             IResult::Error(err) => bail!(QuicError::from(err).context("unable to process public header.")),
@@ -164,6 +98,25 @@ impl<'a> QuicPacketPublicHeader<'a> {
         } else {
             0
         } + self.packet_number_length as usize
+    }
+
+    pub fn write_to<B>(&self, buf: &mut B) -> Result<usize, Error>
+    where
+        B: BufMut,
+    {
+        let mut public_flags = PublicFlags::empty();
+
+        if self.reset_flag {
+            public_flags |= PublicFlags::PACKET_PUBLIC_FLAGS_RST;
+        }
+        if self.versions.is_some() {
+            public_flags |= PublicFlags::PACKET_PUBLIC_FLAGS_VERSION;
+        }
+
+        let public_flags =
+            public_flags.bits() | (self.packet_number_length.as_flags() as u8) << kPublicHeaderSequenceNumberShift;
+
+        Ok(0)
     }
 }
 
@@ -269,7 +222,7 @@ macro_rules! uint (
     );
 );
 
-named_args!(public_header(is_server: bool)<QuicPacketPublicHeader>,
+named_args!(parse_public_header(is_server: bool)<QuicPacketPublicHeader>,
     do_parse!(
         public_flags: map!(call!(be_u8), PublicFlags::from_bits_truncate) >>
 
@@ -293,13 +246,7 @@ named_args!(public_header(is_server: bool)<QuicPacketPublicHeader>,
                 connection_id,
                 versions: server_version.map(|version| vec![version]),
                 nonce: nonce.map(|nonce| array_ref!(nonce, 0, 32)),
-                packet_number_length: match packet_number_length_flag {
-                    PACKET_FLAGS_1BYTE_PACKET => PACKET_1BYTE_PACKET_NUMBER,
-                    PACKET_FLAGS_2BYTE_PACKET => PACKET_2BYTE_PACKET_NUMBER,
-                    PACKET_FLAGS_4BYTE_PACKET => PACKET_4BYTE_PACKET_NUMBER,
-                    PACKET_FLAGS_8BYTE_PACKET => PACKET_6BYTE_PACKET_NUMBER,
-                    _ => unreachable!()
-                },
+                packet_number_length: QuicPacketNumberLength::from(QuicPacketNumberLengthFlags::from(packet_number_length_flag)),
             }
         )
     )
@@ -310,21 +257,20 @@ named!(pub quic_version<QuicVersion>, map_res!(take_str!(4), FromStr::from_str))
 #[cfg(test)]
 mod tests {
     use super::*;
-    use types::{QuicConnectionId, QuicPacketNumber};
 
     const kConnectionId: QuicConnectionId = 0xFEDCBA9876543210;
     const kPacketNumber: QuicPacketNumber = 0x123456789ABC;
 
     #[test]
-    fn parse_public_header() {
+    fn public_header() {
         assert_matches!(
-            public_header(b"", true),
+            parse_public_header(b"", true),
             IResult::Incomplete(Needed::Size(1))
         );
 
         // public flags (8 byte connection_id and 4 byte packet number)
         assert_matches!(
-            public_header(&[0x38], true),
+            parse_public_header(&[0x38], true),
             IResult::Incomplete(Needed::Size(9))
         );
 
@@ -349,7 +295,7 @@ mod tests {
         ];
 
         assert_eq!(
-            public_header(&packet38, true),
+            parse_public_header(&packet38, true),
             IResult::Done(
                 &[0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12][..],
                 QuicPacketPublicHeader {
@@ -357,13 +303,13 @@ mod tests {
                     connection_id: Some(kConnectionId),
                     versions: None,
                     nonce: None,
-                    packet_number_length: PACKET_6BYTE_PACKET_NUMBER,
+                    packet_number_length: QuicPacketNumberLength::PACKET_6BYTE_PACKET_NUMBER,
                 }
             )
         );
 
         assert_eq!(
-            public_header(&packet39, true),
+            parse_public_header(&packet39, true),
             IResult::Done(
                 &[0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC][..],
                 QuicPacketPublicHeader {
@@ -371,7 +317,7 @@ mod tests {
                     connection_id: Some(kConnectionId),
                     versions: None,
                     nonce: None,
-                    packet_number_length: PACKET_6BYTE_PACKET_NUMBER,
+                    packet_number_length: QuicPacketNumberLength::PACKET_6BYTE_PACKET_NUMBER,
                 }
             )
         );

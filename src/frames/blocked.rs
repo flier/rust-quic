@@ -8,7 +8,8 @@ use nom::IResult;
 use constants::kQuicFrameTypeSize;
 use errors::QuicError;
 use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
-use types::{QuicFrameType, QuicStreamId, QuicVersion};
+use proto::QuicStreamId;
+use types::{QuicFrameType, QuicVersion};
 
 /// The `BLOCKED` frame is used to indicate to the remote endpoint
 /// that this endpoint believes itself to be flow-control blocked

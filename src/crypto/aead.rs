@@ -16,7 +16,8 @@ use ring::hmac::SigningKey;
 
 use crypto::{QuicDecrypter, QuicEncrypter};
 use errors::QuicError::*;
-use types::{QuicDiversificationNonce, QuicPacketNumber, QuicVersion};
+use proto::QuicPacketNumber;
+use types::{QuicDiversificationNonce, QuicVersion};
 
 /// An `Aes128Gcm12Encrypter` is a `QuicEncrypter`
 /// that implements the `AEAD_AES_128_GCM_12` algorithm specified in RFC 5282.

@@ -29,6 +29,12 @@ pub enum QuicVersion {
     QUIC_VERSION_41 = 41,
 }
 
+impl Default for QuicVersion {
+    fn default() -> Self {
+        QuicVersion::QUIC_VERSION_35
+    }
+}
+
 impl QuicVersion {
     pub fn endianness(self) -> Endianness {
         if self > QuicVersion::QUIC_VERSION_38 {

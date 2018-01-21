@@ -2,7 +2,8 @@ use failure::Error;
 
 use bytes::Bytes;
 
-use types::{QuicDiversificationNonce, QuicPacketNumber, QuicVersion};
+use proto::QuicPacketNumber;
+use types::{QuicDiversificationNonce, QuicVersion};
 
 /// `QuicDecrypter` implements the QUIC decrypter
 pub trait QuicDecrypter {

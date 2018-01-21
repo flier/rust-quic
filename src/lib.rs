@@ -37,6 +37,7 @@ mod errors;
 mod constants;
 #[macro_use]
 mod types;
+mod proto;
 #[macro_use]
 mod packet;
 pub mod crypto;

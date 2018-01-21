@@ -18,13 +18,8 @@ use time::{Duration, Timespec};
 
 pub type QuicPacketLength = u16;
 pub type QuicHeaderId = u32;
-pub type QuicStreamId = u32;
 pub type QuicByteCount = u64;
-pub type QuicConnectionId = u64;
 pub type QuicPacketCount = u64;
-pub type QuicPacketNumber = u64;
-pub type QuicPublicResetNonceProof = u64;
-pub type QuicStreamOffset = u64;
 pub type QuicDiversificationNonce = [u8; 32];
 pub type QuicTime = Timespec;
 pub type QuicTimeDelta = Duration;

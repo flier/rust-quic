@@ -9,7 +9,8 @@ use num::FromPrimitive;
 use constants::kQuicFrameTypeSize;
 use errors::{QuicError, QuicRstStreamErrorCode};
 use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
-use types::{QuicFrameType, QuicStreamId, QuicStreamOffset, QuicVersion};
+use proto::{QuicStreamId, QuicStreamOffset};
+use types::{QuicFrameType, QuicVersion};
 
 /// The `RST_STREAM` frame allows for abnormal termination of a stream.
 ///

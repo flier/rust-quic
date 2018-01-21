@@ -11,7 +11,8 @@ use crypto::{QuicDecrypter, QuicEncrypter};
 use crypto::fnv::{fnv1a, kOffset};
 use errors::QuicError;
 use errors::QuicError::*;
-use types::{Perspective, QuicDiversificationNonce, QuicPacketNumber, QuicVersion};
+use proto::QuicPacketNumber;
+use types::{Perspective, QuicDiversificationNonce, QuicVersion};
 
 const kHashSizeShort: usize = 12; // size of uint128 serialized short
 
