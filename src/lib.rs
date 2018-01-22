@@ -39,10 +39,14 @@ mod constants;
 mod types;
 mod proto;
 #[macro_use]
-mod packet;
+pub mod packet;
 pub mod crypto;
 #[macro_use]
 mod frames;
 mod framer;
+mod conn;
+mod session;
 
+pub use conn::QuicConnection;
 pub use framer::{QuicFramer, QuicFramerVisitor};
+pub use session::QuicSession;
