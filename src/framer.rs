@@ -1,5 +1,6 @@
 #![allow(non_upper_case_globals)]
 
+use std::cell::RefCell;
 use std::cmp;
 use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -16,78 +17,106 @@ use errors::QuicError::*;
 use frames::{QuicAckFrame, QuicBlockedFrame, QuicConnectionCloseFrame, QuicFrame, QuicFrameReader, QuicFrameWriter,
              QuicGoAwayFrame, QuicPaddingFrame, QuicPingFrame, QuicRstStreamFrame, QuicStopWaitingFrame,
              QuicStreamFrame, QuicWindowUpdateFrame};
-use packet::{quic_version, EncryptedPacket, QuicPacketHeader, QuicPacketPublicHeader, QuicPublicResetPacket,
+use packet::{quic_version, QuicEncryptedPacket, QuicPacketHeader, QuicPacketPublicHeader, QuicPublicResetPacket,
              QuicVersionNegotiationPacket};
 use proto::QuicPacketNumber;
 use types::{EncryptionLevel, Perspective, QuicTime, QuicTimeDelta, QuicVersion, ToEndianness, ToQuicPacketNumber};
 
 pub trait QuicFramerVisitor {
     /// Called when a new packet has been received, before it has been validated or processed.
-    fn on_packet(&self);
+    fn on_packet(&self) {}
 
     /// Called when the public header has been parsed, but has not been authenticated.
     /// If it returns false, framing for this packet will cease.
-    fn on_unauthenticated_public_header(&self, header: &QuicPacketPublicHeader) -> bool;
+    fn on_unauthenticated_public_header(&self, _header: &QuicPacketPublicHeader) -> bool {
+        true
+    }
 
     /// Called only when `perspective` is IS_SERVER and the framer gets a packet with version flag true
     /// and the version on the packet doesn't match `quic_version`.
     /// The visitor should return true after it updates the version of the `framer` to `received_version`
     /// or false to stop processing this packet.
-    fn on_protocol_version_mismatch(&self, received_version: QuicVersion) -> bool;
+    fn on_protocol_version_mismatch(&self, _received_version: QuicVersion) -> bool {
+        true
+    }
 
     /// Called only when `perspective` is IS_CLIENT and a version negotiation packet has been parsed.
-    fn on_version_negotiation_packet(&self, packet: QuicVersionNegotiationPacket);
+    fn on_version_negotiation_packet(&self, _packet: QuicVersionNegotiationPacket) {}
 
     /// Called when a public reset packet has been parsed but has not yet been validated.
-    fn on_public_reset_packet(&self, packet: QuicPublicResetPacket);
+    fn on_public_reset_packet(&self, _packet: QuicPublicResetPacket) {}
 
     /// Called when the unauthenticated portion of the header has been parsed.
     /// If `on_unauthenticated_header` returns false, framing for this packet will cease.
-    fn on_unauthenticated_header(&self, header: &QuicPacketHeader) -> bool;
+    fn on_unauthenticated_header(&self, _header: &QuicPacketHeader) -> bool {
+        true
+    }
 
     /// Called when a packet has been decrypted. `level` is the encryption level of the packet.
-    fn on_decrypted_packet(&self, level: EncryptionLevel);
+    fn on_decrypted_packet(&self, _level: EncryptionLevel) {}
 
     /// Called when the complete header of a packet had been parsed.
     /// If `on_packet_header` returns false, framing for this packet will cease.
-    fn on_packet_header(&self, header: &QuicPacketHeader) -> bool;
+    fn on_packet_header(&self, _header: &QuicPacketHeader) -> bool {
+        true
+    }
 
     /// Called when a `QuicStreamFrame` has been parsed.
     ///
     /// If `on_stream_frame` returns false, the framer will stop parsing the current packet.
-    fn on_stream_frame(&self, frame: QuicStreamFrame) -> bool;
+    fn on_stream_frame(&self, _frame: QuicStreamFrame) -> bool {
+        true
+    }
 
     /// Called when a `QuicAckFrame` has been parsed.
     ///
     /// If `on_ack_frame` returns false, the framer will stop parsing the current packet.
-    fn on_ack_frame(&self, frame: QuicAckFrame) -> bool;
+    fn on_ack_frame(&self, _frame: QuicAckFrame) -> bool {
+        true
+    }
 
     /// Called when a `QuicPaddingFrame` has been parsed.
-    fn on_padding_frame(&self, frame: QuicPaddingFrame) -> bool;
+    fn on_padding_frame(&self, _frame: QuicPaddingFrame) -> bool {
+        true
+    }
 
     /// Called when a `QuicRstStreamFrame` has been parsed.
-    fn on_reset_stream_frame(&self, frame: QuicRstStreamFrame) -> bool;
+    fn on_reset_stream_frame(&self, _frame: QuicRstStreamFrame) -> bool {
+        true
+    }
 
     /// Called when a `QuicConnectionCloseFrame` has been parsed.
-    fn on_connection_close_frame(&self, frame: QuicConnectionCloseFrame) -> bool;
+    fn on_connection_close_frame(&self, _frame: QuicConnectionCloseFrame) -> bool {
+        true
+    }
 
     /// Called when a `QuicGoAwayFrame` has been parsed.
-    fn on_go_away_frame(&self, frame: QuicGoAwayFrame) -> bool;
+    fn on_go_away_frame(&self, _frame: QuicGoAwayFrame) -> bool {
+        true
+    }
 
     /// Called when a `QuicWindowUpdateFrame` has been parsed.
-    fn on_window_update_frame(&self, frame: QuicWindowUpdateFrame) -> bool;
+    fn on_window_update_frame(&self, _frame: QuicWindowUpdateFrame) -> bool {
+        true
+    }
 
     /// Called when a `QuicBlockedFrame` has been parsed.
-    fn on_blocked_frame(&self, frame: QuicBlockedFrame) -> bool;
+    fn on_blocked_frame(&self, _frame: QuicBlockedFrame) -> bool {
+        true
+    }
 
     /// Called when a `QuicStopWaitingFrame` has been parsed.
-    fn on_stop_waiting_frame(&self, frame: QuicStopWaitingFrame) -> bool;
+    fn on_stop_waiting_frame(&self, _frame: QuicStopWaitingFrame) -> bool {
+        true
+    }
 
     /// Called when a PingFrame has been parsed.
-    fn on_ping_frame(&self, frame: QuicPingFrame) -> bool;
+    fn on_ping_frame(&self, _frame: QuicPingFrame) -> bool {
+        true
+    }
 
     /// Called when a packet has been completely processed.
-    fn on_packet_complete(&self);
+    fn on_packet_complete(&self) {}
 }
 
 /// Class for parsing and constructing QUIC packets.
@@ -99,92 +128,32 @@ where
 {
     supported_versions: &'a [QuicVersion],
     quic_version: QuicVersion,
-    visitor: V,
-    /// Updated by `process_packet_header` when it succeeds.
-    last_packet_number: QuicPacketNumber,
-    /// Updated by `process_packet_header` when it succeeds decrypting a larger packet.
-    largest_packet_number: QuicPacketNumber,
-    /// Primary decrypter used to decrypt packets during parsing.
-    decrypter: Box<QuicDecrypter>,
-    /// Alternative decrypter that can also be used to decrypt packets.
-    alternative_decrypter: Option<Box<QuicDecrypter>>,
-    /// The encryption level of `decrypter`.
-    decrypter_level: EncryptionLevel,
-    /// The encryption level of `alternative_decrypter`.
-    alternative_decrypter_level: EncryptionLevel,
-    /// `alternative_decrypter_latch` is true if,
-    /// when `alternative_decrypter` successfully decrypts a packet,
-    /// we should install it as the only decrypter.
-    alternative_decrypter_latch: bool,
     /// The time this framer was created.
     /// Time written to the wire will be written as a delta from this value.
     creation_time: QuicTime,
-    /// The time delta computed for the last timestamp frame.
-    /// This is relative to the creation_time.
-    last_timestamp: QuicTimeDelta,
+    visitor: &'a V,
+    state: RefCell<State>,
 }
 
 impl<'a, V> QuicFramer<'a, V>
 where
     V: 'a,
 {
-    pub fn new<P>(supported_versions: &'a [QuicVersion], creation_time: QuicTime, visitor: V) -> Self
+    pub fn new<P>(supported_versions: &'a [QuicVersion], creation_time: QuicTime, visitor: &'a V) -> Self
     where
         P: 'static + Perspective,
     {
         QuicFramer {
             supported_versions,
             quic_version: supported_versions[0],
-            visitor,
-            last_packet_number: 0,
-            largest_packet_number: 0,
-            decrypter: Box::new(NullDecrypter::<P>::default()),
-            alternative_decrypter: None,
-            decrypter_level: EncryptionLevel::None,
-            alternative_decrypter_level: EncryptionLevel::None,
-            alternative_decrypter_latch: false,
             creation_time,
-            last_timestamp: QuicTimeDelta::zero(),
+            visitor,
+            state: RefCell::new(State::new::<P>()),
         }
     }
 
     pub fn version(&self) -> QuicVersion {
         self.quic_version
-    }
-
-    /// `set_decrypter` sets the primary decrypter, replacing any that already exists, and takes ownership.
-    /// If an alternative decrypter is in place then the function DCHECKs.
-    /// This is intended for cases where one knows that future packets will be using the new decrypter and
-    /// the previous decrypter is now obsolete. `level` indicates the encryption level of the new decrypter.
-    pub fn set_decrypter(&mut self, level: EncryptionLevel, decrypter: Box<QuicDecrypter>) {
-        debug_assert!(self.alternative_decrypter.is_none());
-        debug_assert!(level >= self.decrypter_level);
-
-        self.decrypter = decrypter;
-        self.decrypter_level = level;
-    }
-
-    /// `set_alternative_decrypter` sets a decrypter that may be used to decrypt future packets and takes ownership of it.
-    /// `level` indicates the encryption level of the decrypter.
-    /// If `latch_once_used` is true, then the first time that the decrypter is successful it will replace the primary decrypter.
-    /// Otherwise both decrypters will remain active and the primary decrypter will be the one last used.
-    pub fn set_alternative_decrypter(
-        &mut self,
-        level: EncryptionLevel,
-        decrypter: Box<QuicDecrypter>,
-        latch_once_used: bool,
-    ) {
-        self.alternative_decrypter = Some(decrypter);
-        self.alternative_decrypter_level = level;
-        self.alternative_decrypter_latch = latch_once_used;
-    }
-
-    pub fn decrypter(&self) -> &QuicDecrypter {
-        self.decrypter.as_ref()
-    }
-
-    pub fn alternative_decrypter(&self) -> Option<&QuicDecrypter> {
-        self.alternative_decrypter.as_ref().map(|d| d.as_ref())
     }
 }
 
@@ -192,7 +161,7 @@ impl<'a, V> QuicFramer<'a, V>
 where
     V: 'a + QuicFramerVisitor,
 {
-    pub fn process_packet<P>(&mut self, packet: &EncryptedPacket) -> Result<(), Error>
+    pub fn process_packet<P>(&self, packet: &QuicEncryptedPacket) -> Result<(), Error>
     where
         P: Perspective,
     {
@@ -203,7 +172,7 @@ where
         }
     }
 
-    fn parse_packet<'p, P, E>(&mut self, packet: &'p EncryptedPacket) -> Result<(), Error>
+    fn parse_packet<'p, P, E>(&self, packet: &'p QuicEncryptedPacket) -> Result<(), Error>
     where
         P: Perspective,
         E: ByteOrder + ToEndianness,
@@ -272,10 +241,9 @@ where
         );
 
         if message.tag() != kPRST {
-            bail!(InvalidResetPacket(format!(
-                "incorrect message tag: {}",
-                message.tag()
-            )));
+            bail!(InvalidResetPacket(
+                format!("incorrect message tag: {}", message.tag())
+            ));
         }
 
         let packet = QuicPublicResetPacket {
@@ -296,10 +264,10 @@ where
     }
 
     fn process_data_packet<'p, P, E>(
-        &mut self,
+        &self,
         input: &'p [u8],
         public_header: QuicPacketPublicHeader<'p>,
-        packet: &'p EncryptedPacket,
+        packet: &'p QuicEncryptedPacket,
     ) -> Result<(), Error>
     where
         P: Perspective,
@@ -318,7 +286,7 @@ where
 
         // Set the last packet number after we have decrypted the packet
         // so we are confident is not attacker controlled.
-        self.set_last_packet_number(&header);
+        self.state.borrow_mut().set_last_packet_number(&header);
 
         if !self.visitor.on_packet_header(&header) {
             // The visitor suppresses further processing of the packet.
@@ -345,7 +313,7 @@ where
     where
         E: ByteOrder,
     {
-        let base_packet_number = self.largest_packet_number;
+        let base_packet_number = self.state.borrow().largest_packet_number;
 
         let (remaining, packet_number) = self.process_and_calculate_packet_number::<E>(
             input,
@@ -383,29 +351,30 @@ where
     }
 
     fn decrypt_payload<'p, P>(
-        &mut self,
+        &self,
         input: &'p [u8],
         header: &'p QuicPacketHeader,
-        packet: &'p EncryptedPacket,
+        packet: &'p QuicEncryptedPacket,
     ) -> Result<Bytes, Error>
     where
         P: Perspective,
     {
-        let associated_data = self.get_associated_data_from_encrypted_packet(header, packet);
+        let associated_data = &packet.as_bytes()[..header.size()];
 
-        if let Ok(decrypted) = self.decrypter.decrypt_packet(
+        if let Ok(decrypted) = self.state.borrow().decrypter.decrypt_packet(
             self.quic_version,
             header.packet_number,
             associated_data,
             input,
         ) {
-            self.visitor.on_decrypted_packet(self.decrypter_level);
+            self.visitor
+                .on_decrypted_packet(self.state.borrow().decrypter_level);
 
             return Ok(decrypted);
         }
 
-        if let Some(decrypter) = self.alternative_decrypter.take() {
-            let try_alternative_decryption = self.alternative_decrypter_level != EncryptionLevel::Initial
+        if let Some(decrypter) = self.state.borrow_mut().alternative_decrypter.take() {
+            let try_alternative_decryption = self.state.borrow().alternative_decrypter_level != EncryptionLevel::Initial
                 || P::is_server() || header.public_header.nonce.is_some();
 
             if try_alternative_decryption {
@@ -416,16 +385,21 @@ where
                     input,
                 ) {
                     self.visitor
-                        .on_decrypted_packet(self.alternative_decrypter_level);
+                        .on_decrypted_packet(self.state.borrow().alternative_decrypter_level);
 
-                    if self.alternative_decrypter_latch {
-                        self.decrypter = decrypter;
-                        self.decrypter_level = self.alternative_decrypter_level;
-                        self.alternative_decrypter_level = EncryptionLevel::None;
+                    if self.state.borrow().alternative_decrypter_latch {
+                        self.state.borrow_mut().decrypter = decrypter;
+                        self.state.borrow_mut().decrypter_level = self.state.borrow().alternative_decrypter_level;
+                        self.state.borrow_mut().alternative_decrypter_level = EncryptionLevel::None;
                     } else {
-                        self.alternative_decrypter = Some(mem::replace(&mut self.decrypter, decrypter));
-                        self.decrypter_level =
-                            mem::replace(&mut self.alternative_decrypter_level, self.decrypter_level);
+                        self.state.borrow_mut().alternative_decrypter = Some(mem::replace(
+                            &mut self.state.borrow_mut().decrypter,
+                            decrypter,
+                        ));
+                        self.state.borrow_mut().decrypter_level = mem::replace(
+                            &mut self.state.borrow_mut().alternative_decrypter_level,
+                            self.state.borrow().decrypter_level,
+                        );
                     }
 
                     return Ok(decrypted);
@@ -437,19 +411,6 @@ where
             "decrypt packet failed for packet_number: {}",
             header.packet_number
         );
-    }
-
-    fn get_associated_data_from_encrypted_packet<'p>(
-        &self,
-        header: &QuicPacketHeader,
-        packet: &'p EncryptedPacket,
-    ) -> &'p [u8] {
-        &packet.as_bytes()[..header.size()]
-    }
-
-    fn set_last_packet_number(&mut self, header: &QuicPacketHeader) {
-        self.last_packet_number = header.packet_number;
-        self.largest_packet_number = cmp::max(self.largest_packet_number, header.packet_number);
     }
 
     fn process_frame_data(&self, header: &QuicPacketHeader, payload: &[u8]) -> Result<(), Error> {
@@ -533,6 +494,88 @@ where
     }
 }
 
+struct State {
+    /// Updated by `process_packet_header` when it succeeds.
+    last_packet_number: QuicPacketNumber,
+    /// Updated by `process_packet_header` when it succeeds decrypting a larger packet.
+    largest_packet_number: QuicPacketNumber,
+    /// Primary decrypter used to decrypt packets during parsing.
+    decrypter: Box<QuicDecrypter>,
+    /// Alternative decrypter that can also be used to decrypt packets.
+    alternative_decrypter: Option<Box<QuicDecrypter>>,
+    /// The encryption level of `decrypter`.
+    decrypter_level: EncryptionLevel,
+    /// The encryption level of `alternative_decrypter`.
+    alternative_decrypter_level: EncryptionLevel,
+    /// `alternative_decrypter_latch` is true if,
+    /// when `alternative_decrypter` successfully decrypts a packet,
+    /// we should install it as the only decrypter.
+    alternative_decrypter_latch: bool,
+    /// The time delta computed for the last timestamp frame.
+    /// This is relative to the creation_time.
+    last_timestamp: QuicTimeDelta,
+}
+
+impl State {
+    fn new<P>() -> Self
+    where
+        P: 'static + Perspective,
+    {
+        State {
+            last_packet_number: 0,
+            largest_packet_number: 0,
+            decrypter: Box::new(NullDecrypter::<P>::default()),
+            alternative_decrypter: None,
+            decrypter_level: EncryptionLevel::None,
+            alternative_decrypter_level: EncryptionLevel::None,
+            alternative_decrypter_latch: false,
+            last_timestamp: QuicTimeDelta::zero(),
+        }
+    }
+
+    /// `set_decrypter` sets the primary decrypter, replacing any that already exists, and takes ownership.
+    /// If an alternative decrypter is in place then the function DCHECKs.
+    /// This is intended for cases where one knows that future packets will be using the new decrypter and
+    /// the previous decrypter is now obsolete. `level` indicates the encryption level of the new decrypter.
+    pub fn set_decrypter(&mut self, level: EncryptionLevel, decrypter: Box<QuicDecrypter>) {
+        debug_assert!(self.alternative_decrypter.is_none());
+        debug_assert!(level >= self.decrypter_level);
+
+        self.decrypter = decrypter;
+        self.decrypter_level = level;
+    }
+
+    /// `set_alternative_decrypter` sets a decrypter
+    /// that may be used to decrypt future packets and takes ownership of it.
+    /// `level` indicates the encryption level of the decrypter.
+    /// If `latch_once_used` is true, then the first time that the decrypter is successful
+    /// it will replace the primary decrypter.
+    /// Otherwise both decrypters will remain active and the primary decrypter will be the one last used.
+    pub fn set_alternative_decrypter(
+        &mut self,
+        level: EncryptionLevel,
+        decrypter: Box<QuicDecrypter>,
+        latch_once_used: bool,
+    ) {
+        self.alternative_decrypter = Some(decrypter);
+        self.alternative_decrypter_level = level;
+        self.alternative_decrypter_latch = latch_once_used;
+    }
+
+    pub fn decrypter(&self) -> &QuicDecrypter {
+        self.decrypter.as_ref()
+    }
+
+    pub fn alternative_decrypter(&self) -> Option<&QuicDecrypter> {
+        self.alternative_decrypter.as_ref().map(|d| d.as_ref())
+    }
+
+    pub fn set_last_packet_number(&mut self, header: &QuicPacketHeader) {
+        self.last_packet_number = header.packet_number;
+        self.largest_packet_number = cmp::max(self.largest_packet_number, header.packet_number);
+    }
+}
+
 struct FrameReader<'a, 'p, V>
 where
     V: 'a,
@@ -565,7 +608,7 @@ impl<'a, 'p, V> QuicFrameReader<'a> for FrameReader<'a, 'p, V> {
     }
 
     fn last_timestamp(&self) -> QuicTimeDelta {
-        self.framer.last_timestamp
+        self.framer.state.borrow().last_timestamp
     }
 }
 
