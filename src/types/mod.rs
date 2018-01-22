@@ -51,3 +51,22 @@ pub enum PeerAddressChangeType {
     /// IP address change from an IPv6 to an IPv6 address (port may have changed.)
     IPV6_TO_IPV6_CHANGE,
 }
+
+/// Describes whether a ConnectionClose was originated by the peer.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ConnectionCloseSource {
+    FROM_PEER,
+    FROM_SELF,
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TransmissionType {
+    NOT_RETRANSMISSION,
+    HANDSHAKE_RETRANSMISSION,   // Retransmits due to handshake timeouts.
+    ALL_UNACKED_RETRANSMISSION, // Retransmits all unacked packets.
+    ALL_INITIAL_RETRANSMISSION, // Retransmits all initially encrypted packets.
+    LOSS_RETRANSMISSION,        // Retransmits due to loss detection.
+    RTO_RETRANSMISSION,         // Retransmits due to retransmit time out.
+    TLP_RETRANSMISSION,         // Tail loss probes.
+}

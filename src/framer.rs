@@ -127,11 +127,11 @@ pub struct QuicFramer<'a, V>
 where
     V: 'a,
 {
-    supported_versions: &'a [QuicVersion],
-    quic_version: QuicVersion,
+    pub supported_versions: &'a [QuicVersion],
+    pub quic_version: QuicVersion,
     /// The time this framer was created.
     /// Time written to the wire will be written as a delta from this value.
-    creation_time: QuicTime,
+    pub creation_time: QuicTime,
     visitor: Option<Rc<V>>,
     state: RefCell<State>,
 }
@@ -152,16 +152,18 @@ where
             state: RefCell::new(State::new::<P>()),
         }
     }
-
-    pub fn version(&self) -> QuicVersion {
-        self.quic_version
-    }
 }
 
 impl<'a, V> QuicFramer<'a, V>
 where
     V: 'a + QuicFramerVisitor,
 {
+    // Returns true if |version| is a supported protocol version.
+    pub fn is_supported_version(&self, version: QuicVersion) -> bool {
+        self.supported_versions.contains(&version)
+    }
+
+    /// Set callbacks to be called from the framer.
     pub fn set_visitor(&mut self, visitor: Rc<V>) {
         self.visitor = Some(visitor);
     }
@@ -253,9 +255,10 @@ where
         );
 
         if message.tag() != kPRST {
-            bail!(InvalidResetPacket(
-                format!("incorrect message tag: {}", message.tag())
-            ));
+            bail!(InvalidResetPacket(format!(
+                "incorrect message tag: {}",
+                message.tag()
+            )));
         }
 
         let packet = QuicPublicResetPacket {
