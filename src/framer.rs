@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::cmp;
 use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::rc::Rc;
 
 use byteorder::{ByteOrder, NativeEndian, NetworkEndian};
 use bytes::{BufMut, Bytes};
@@ -131,7 +132,7 @@ where
     /// The time this framer was created.
     /// Time written to the wire will be written as a delta from this value.
     creation_time: QuicTime,
-    visitor: &'a V,
+    visitor: Option<Rc<V>>,
     state: RefCell<State>,
 }
 
@@ -139,7 +140,7 @@ impl<'a, V> QuicFramer<'a, V>
 where
     V: 'a,
 {
-    pub fn new<P>(supported_versions: &'a [QuicVersion], creation_time: QuicTime, visitor: &'a V) -> Self
+    pub fn new<P>(supported_versions: &'a [QuicVersion], creation_time: QuicTime) -> Self
     where
         P: 'static + Perspective,
     {
@@ -147,7 +148,7 @@ where
             supported_versions,
             quic_version: supported_versions[0],
             creation_time,
-            visitor,
+            visitor: None,
             state: RefCell::new(State::new::<P>()),
         }
     }
@@ -161,6 +162,10 @@ impl<'a, V> QuicFramer<'a, V>
 where
     V: 'a + QuicFramerVisitor,
 {
+    pub fn set_visitor(&mut self, visitor: Rc<V>) {
+        self.visitor = Some(visitor);
+    }
+
     pub fn process_packet<P>(&self, packet: &QuicEncryptedPacket) -> Result<(), Error>
     where
         P: Perspective,
@@ -177,7 +182,9 @@ where
         P: Perspective,
         E: ByteOrder + ToEndianness,
     {
-        self.visitor.on_packet();
+        if let Some(ref visitor) = self.visitor {
+            visitor.on_packet();
+        }
 
         // First parse the public header.
         let (public_header, payload) = QuicPacketPublicHeader::parse(packet, P::is_server())?;
@@ -188,26 +195,29 @@ where
             ));
         }
 
-        if !self.visitor
-            .on_unauthenticated_public_header(&public_header)
-        {
-            // The visitor suppresses further processing of the packet.
-            Ok(())
-        } else {
-            let protocol_version_mismatched = P::is_server()
-                && public_header.versions.as_ref().map_or(false, |versions| {
-                    versions[0] != self.quic_version && !self.visitor.on_protocol_version_mismatch(versions[0])
-                });
-
-            if protocol_version_mismatched {
-                Ok(())
-            } else if !P::is_server() && public_header.versions.as_ref().is_some() {
-                self.process_version_negotiation_packet(payload, public_header)
-            } else if public_header.reset_flag {
-                self.process_public_reset_packet(payload, public_header)
-            } else {
-                self.process_data_packet::<P, E>(payload, public_header, packet)
+        if let Some(ref visitor) = self.visitor {
+            if visitor.on_unauthenticated_public_header(&public_header) {
+                // The visitor suppresses further processing of the packet.
+                return Ok(());
             }
+        }
+
+        let protocol_version_mismatched = P::is_server() && public_header.versions.as_ref().map_or(false, |versions| {
+            versions[0] != self.quic_version && if let Some(ref visitor) = self.visitor {
+                !visitor.on_protocol_version_mismatch(versions[0])
+            } else {
+                false
+            }
+        });
+
+        if protocol_version_mismatched {
+            Ok(())
+        } else if !P::is_server() && public_header.versions.as_ref().is_some() {
+            self.process_version_negotiation_packet(payload, public_header)
+        } else if public_header.reset_flag {
+            self.process_public_reset_packet(payload, public_header)
+        } else {
+            self.process_data_packet::<P, E>(payload, public_header, packet)
         }
     }
 
@@ -222,7 +232,9 @@ where
             .map_err(QuicError::from)
             .context("Unable to read supported version in negotiation.")?);
 
-        self.visitor.on_version_negotiation_packet(public_header);
+        if let Some(ref visitor) = self.visitor {
+            visitor.on_version_negotiation_packet(public_header);
+        }
 
         Ok(())
     }
@@ -258,7 +270,9 @@ where
             }),
         };
 
-        self.visitor.on_public_reset_packet(packet);
+        if let Some(ref visitor) = self.visitor {
+            visitor.on_public_reset_packet(packet);
+        }
 
         Ok(())
     }
@@ -275,20 +289,25 @@ where
     {
         let (remaining, header) = self.process_unauthenticated_header::<E>(input, public_header)?;
 
-        if !self.visitor.on_unauthenticated_header(&header) {
+        if !self.visitor
+            .as_ref()
+            .map_or(true, |visitor| visitor.on_unauthenticated_header(&header))
+        {
             debug!("Visitor asked to stop processing of unauthenticated header.");
 
             return Ok(());
         }
 
-        let payload = self.decrypt_payload::<P>(remaining, &header, packet)
-            .context("Unable to decrypt payload.")?;
+        let payload = self.decrypt_payload::<P>(remaining, &header, packet)?;
 
         // Set the last packet number after we have decrypted the packet
         // so we are confident is not attacker controlled.
         self.state.borrow_mut().set_last_packet_number(&header);
 
-        if !self.visitor.on_packet_header(&header) {
+        if !self.visitor
+            .as_ref()
+            .map_or(true, |visitor| visitor.on_packet_header(&header))
+        {
             // The visitor suppresses further processing of the packet.
             return Ok(());
         }
@@ -300,7 +319,9 @@ where
         // Handle the payload.
         self.process_frame_data(&header, &payload)?;
 
-        self.visitor.on_packet_complete();
+        if let Some(ref visitor) = self.visitor {
+            visitor.on_packet_complete();
+        }
 
         Ok(())
     }
@@ -367,8 +388,9 @@ where
             associated_data,
             input,
         ) {
-            self.visitor
-                .on_decrypted_packet(self.state.borrow().decrypter_level);
+            if let Some(ref visitor) = self.visitor {
+                visitor.on_decrypted_packet(self.state.borrow().decrypter_level);
+            }
 
             return Ok(decrypted);
         }
@@ -384,8 +406,9 @@ where
                     associated_data,
                     input,
                 ) {
-                    self.visitor
-                        .on_decrypted_packet(self.state.borrow().alternative_decrypter_level);
+                    if let Some(ref visitor) = self.visitor {
+                        visitor.on_decrypted_packet(self.state.borrow().alternative_decrypter_level);
+                    }
 
                     if self.state.borrow().alternative_decrypter_latch {
                         self.state.borrow_mut().decrypter = decrypter;
@@ -407,10 +430,7 @@ where
             }
         }
 
-        bail!(
-            "decrypt packet failed for packet_number: {}",
-            header.packet_number
-        );
+        bail!(DecryptionFailure(header.packet_number));
     }
 
     fn process_frame_data(&self, header: &QuicPacketHeader, payload: &[u8]) -> Result<(), Error> {
@@ -420,52 +440,82 @@ where
             debug!("parsed frame: {:?}", frame);
 
             match frame? {
-                QuicFrame::Padding(frame) => if !self.visitor.on_padding_frame(frame) {
+                QuicFrame::Padding(frame) => if !self.visitor
+                    .as_ref()
+                    .map_or(true, |visitor| visitor.on_padding_frame(frame))
+                {
                     debug!("Visitor asked to stop further processing.");
 
                     break;
                 },
-                QuicFrame::ResetStream(frame) => if !self.visitor.on_reset_stream_frame(frame) {
+                QuicFrame::ResetStream(frame) => if !self.visitor
+                    .as_ref()
+                    .map_or(true, |visitor| visitor.on_reset_stream_frame(frame))
+                {
                     debug!("Visitor asked to stop further processing.");
 
                     break;
                 },
-                QuicFrame::ConnectionClose(frame) => if !self.visitor.on_connection_close_frame(frame) {
+                QuicFrame::ConnectionClose(frame) => if !self.visitor
+                    .as_ref()
+                    .map_or(true, |visitor| visitor.on_connection_close_frame(frame))
+                {
                     debug!("Visitor asked to stop further processing.");
 
                     break;
                 },
-                QuicFrame::GoAway(frame) => if !self.visitor.on_go_away_frame(frame) {
+                QuicFrame::GoAway(frame) => if !self.visitor
+                    .as_ref()
+                    .map_or(true, |visitor| visitor.on_go_away_frame(frame))
+                {
                     debug!("Visitor asked to stop further processing.");
 
                     break;
                 },
-                QuicFrame::WindowUpdate(frame) => if !self.visitor.on_window_update_frame(frame) {
+                QuicFrame::WindowUpdate(frame) => if !self.visitor
+                    .as_ref()
+                    .map_or(true, |visitor| visitor.on_window_update_frame(frame))
+                {
                     debug!("Visitor asked to stop further processing.");
 
                     break;
                 },
-                QuicFrame::Blocked(frame) => if !self.visitor.on_blocked_frame(frame) {
+                QuicFrame::Blocked(frame) => if !self.visitor
+                    .as_ref()
+                    .map_or(true, |visitor| visitor.on_blocked_frame(frame))
+                {
                     debug!("Visitor asked to stop further processing.");
 
                     break;
                 },
-                QuicFrame::StopWaiting(frame) => if !self.visitor.on_stop_waiting_frame(frame) {
+                QuicFrame::StopWaiting(frame) => if !self.visitor
+                    .as_ref()
+                    .map_or(true, |visitor| visitor.on_stop_waiting_frame(frame))
+                {
                     debug!("Visitor asked to stop further processing.");
 
                     break;
                 },
-                QuicFrame::Ping(frame) => if !self.visitor.on_ping_frame(frame) {
+                QuicFrame::Ping(frame) => if !self.visitor
+                    .as_ref()
+                    .map_or(true, |visitor| visitor.on_ping_frame(frame))
+                {
                     debug!("Visitor asked to stop further processing.");
 
                     break;
                 },
-                QuicFrame::Stream(frame) => if !self.visitor.on_stream_frame(frame) {
+                QuicFrame::Stream(frame) => if !self.visitor
+                    .as_ref()
+                    .map_or(true, |visitor| visitor.on_stream_frame(frame))
+                {
                     debug!("Visitor asked to stop further processing.");
 
                     break;
                 },
-                QuicFrame::Ack(frame) => if !self.visitor.on_ack_frame(frame) {
+                QuicFrame::Ack(frame) => if !self.visitor
+                    .as_ref()
+                    .map_or(true, |visitor| visitor.on_ack_frame(frame))
+                {
                     debug!("Visitor asked to stop further processing.");
 
                     break;

@@ -22,6 +22,7 @@ extern crate nom;
 extern crate num;
 #[macro_use]
 extern crate num_derive;
+extern crate prometheus;
 extern crate ring;
 extern crate time;
 

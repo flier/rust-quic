@@ -248,6 +248,12 @@ impl Deref for QuicReceivedPacket {
     }
 }
 
+impl From<QuicReceivedPacket> for QuicEncryptedPacket {
+    fn from(packet: QuicReceivedPacket) -> Self {
+        packet.packet
+    }
+}
+
 pub type QuicVersionNegotiationPacket<'a> = QuicPacketPublicHeader<'a>;
 
 /// Recognizes big endian unsigned 8 bytes integer

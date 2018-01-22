@@ -4,6 +4,7 @@ use extprim::u128::u128;
 use nom;
 use num::FromPrimitive;
 
+use proto::QuicPacketNumber;
 use types::QuicTag;
 
 #[derive(Debug, Fail, PartialEq)]
@@ -37,6 +38,8 @@ pub enum QuicError {
     #[fail(display = "tags {} out of order", _0)] TagOutOfOrder(QuicTag),
 
     #[fail(display = "offset {} out of order", _0)] OffsetOutOfOrder(usize),
+
+    #[fail(display = "decrypt packet failed for packet_number {}", _0)] DecryptionFailure(QuicPacketNumber),
 
     #[fail(display = "underflow with first ack block length")] FirstAckBlockLengthOverflow,
 
