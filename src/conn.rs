@@ -84,6 +84,16 @@ where
             visitor.on_packet_received(self_addr, peer_addr, &packet)
         }
 
+        self.state.borrow_mut().last_packet_source_address = Some(self_addr.clone());
+        self.state.borrow_mut().last_packet_destination_address = Some(peer_addr.clone());
+
+        if self.state.borrow().self_addr.is_none() {
+            self.state.borrow_mut().self_addr = Some(self_addr.clone());
+        }
+        if self.state.borrow().peer_addr.is_none() {
+            self.state.borrow_mut().peer_addr = Some(peer_addr.clone());
+        }
+
         self.stats.bytes_received.inc_by(packet.len() as f64)?;
         self.stats.packets_received.inc();
 
@@ -132,6 +142,10 @@ struct State {
     pub self_addr: Option<SocketAddr>,
     /// Peer address on the last successfully processed packet received from the client.
     pub peer_addr: Option<SocketAddr>,
+    /// Destination address of the last received packet.
+    pub last_packet_destination_address: Option<SocketAddr>,
+    /// Source address of the last received packet.
+    pub last_packet_source_address: Option<SocketAddr>,
     /// Records change type when the peer initiates migration to a new peer address.
     /// Reset to NO_CHANGE after peer migration is validated.
     pub active_peer_migration_type: PeerAddressChangeType,
@@ -159,6 +173,8 @@ impl State {
             encryption_level: EncryptionLevel::None,
             self_addr: None,
             peer_addr: None,
+            last_packet_destination_address: None,
+            last_packet_source_address: None,
             active_peer_migration_type: PeerAddressChangeType::NO_CHANGE,
             time_of_last_received_packet: now,
             time_of_last_sent_new_packet: now,
