@@ -211,7 +211,7 @@ where
         self.visitor.on_packet();
 
         // First parse the public header.
-        let (payload, public_header) = QuicPacketPublicHeader::parse::<E>(packet, P::is_server())?;
+        let (public_header, payload) = QuicPacketPublicHeader::parse(packet, P::is_server())?;
 
         if public_header.reset_flag && public_header.versions.is_some() {
             bail!(InvalidPacketHeader(
@@ -515,19 +515,19 @@ where
         Ok(())
     }
 
-    pub fn build_data_packet<I, B>(
+    pub fn build_data_packet<E, I, B>(
         &'a self,
         header: &'a QuicPacketHeader<'a>,
         frames: I,
         buf: &mut B,
     ) -> Result<usize, Error>
     where
+        E: ByteOrder,
         I: IntoIterator<Item = QuicFrame<'a>>,
         B: BufMut,
     {
-        let header_size = header.write_to(buf)?;
-        let frame_writer = FrameWriter::new(self, header);
-        let frames_size = frame_writer.write_frames(frames, buf)?;
+        let header_size = header.write_to::<E, B>(buf)?;
+        let frames_size = FrameWriter::new(self, header).write_frames(frames, buf)?;
 
         Ok(header_size + frames_size)
     }

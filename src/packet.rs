@@ -1,19 +1,20 @@
 #![allow(dead_code, non_upper_case_globals)]
 
+use std::mem;
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::str::FromStr;
 
-use byteorder::ByteOrder;
+use byteorder::{ByteOrder, NetworkEndian};
 use bytes::{BufMut, Bytes};
-use failure::{Error, Fail};
+use failure::Error;
 use nom::{IResult, Needed, be_u64, be_u8};
 
 use constants::{kPublicFlagsSize, kQuicVersionSize};
 use errors::QuicError::{self, IncompletePacket};
-use proto::{QuicConnectionId, QuicConnectionIdLength, QuicPacketNumber, QuicPacketNumberLength,
-            QuicPacketNumberLengthFlags, QuicPublicResetNonceProof};
-use types::{QuicDiversificationNonce, QuicVersion, ToEndianness};
+use proto::{QuicConnectionId, QuicPacketNumber, QuicPacketNumberLength, QuicPacketNumberLengthFlags,
+            QuicPublicResetNonceProof};
+use types::{QuicDiversificationNonce, QuicTag, QuicVersion};
 
 const kPublicHeaderConnectionIdSize: usize = 8;
 
@@ -73,14 +74,11 @@ pub struct QuicPacketPublicHeader<'a> {
 }
 
 impl<'a> QuicPacketPublicHeader<'a> {
-    pub fn parse<E>(buf: &[u8], is_server: bool) -> Result<(&[u8], QuicPacketPublicHeader), Error>
-    where
-        E: ByteOrder + ToEndianness,
-    {
+    pub fn parse(buf: &[u8], is_server: bool) -> Result<(QuicPacketPublicHeader, &[u8]), Error> {
         match parse_public_header(buf, is_server) {
-            IResult::Done(remaining, header) => Ok((remaining, header)),
-            IResult::Incomplete(needed) => bail!(IncompletePacket(needed).context("incomplete public header.")),
-            IResult::Error(err) => bail!(QuicError::from(err).context("unable to process public header.")),
+            IResult::Done(remaining, header) => Ok((header, remaining)),
+            IResult::Incomplete(needed) => bail!(IncompletePacket(needed)),
+            IResult::Error(err) => bail!(QuicError::from(err)),
         }
     }
 
@@ -100,11 +98,12 @@ impl<'a> QuicPacketPublicHeader<'a> {
         } + self.packet_number_length as usize
     }
 
-    pub fn write_to<B>(&self, buf: &mut B) -> Result<usize, Error>
+    pub fn write_to<E, B>(&self, buf: &mut B) -> Result<usize, Error>
     where
+        E: ByteOrder,
         B: BufMut,
     {
-        let mut public_flags = PublicFlags::empty();
+        let mut public_flags = PublicFlags::PACKET_PUBLIC_FLAGS_NONE;
 
         if self.reset_flag {
             public_flags |= PublicFlags::PACKET_PUBLIC_FLAGS_RST;
@@ -112,11 +111,42 @@ impl<'a> QuicPacketPublicHeader<'a> {
         if self.versions.is_some() {
             public_flags |= PublicFlags::PACKET_PUBLIC_FLAGS_VERSION;
         }
+        if self.nonce.is_some() {
+            public_flags |= PublicFlags::PACKET_PUBLIC_FLAGS_NONCE;
+        }
+        if self.connection_id.is_some() {
+            public_flags |= PublicFlags::PACKET_PUBLIC_FLAGS_8BYTE_CONNECTION_ID
+        } else {
+            public_flags |= PublicFlags::PACKET_PUBLIC_FLAGS_0BYTE_CONNECTION_ID;
+        }
 
-        let public_flags =
-            public_flags.bits() | (self.packet_number_length.as_flags() as u8) << kPublicHeaderSequenceNumberShift;
+        buf.put_u8(
+            public_flags.bits() | (self.packet_number_length.as_flags() as u8) << kPublicHeaderSequenceNumberShift,
+        );
 
-        Ok(0)
+        let mut wrote = 1;
+
+        if let Some(connection_id) = self.connection_id {
+            buf.put_u64::<NetworkEndian>(connection_id);
+
+            wrote += mem::size_of::<u64>();
+        }
+
+        if let Some(ref versions) = self.versions {
+            if let Some(&version) = versions.first() {
+                buf.put_slice(QuicTag::from(version).as_bytes());
+
+                wrote += mem::size_of::<u32>();
+            }
+        }
+
+        if let Some(nonce) = self.nonce {
+            buf.put_slice(nonce);
+
+            wrote += nonce.len();
+        }
+
+        Ok(wrote)
     }
 }
 
@@ -124,6 +154,45 @@ impl<'a> QuicPacketPublicHeader<'a> {
 pub struct QuicPacketHeader<'a> {
     pub public_header: QuicPacketPublicHeader<'a>,
     pub packet_number: QuicPacketNumber,
+}
+
+impl<'a> QuicPacketHeader<'a> {
+    pub fn parse<E>(buf: &'a [u8], is_server: bool) -> Result<(QuicPacketHeader<'a>, &[u8]), Error>
+    where
+        E: ByteOrder,
+    {
+        let (public_header, remaining) = QuicPacketPublicHeader::parse(buf, is_server)?;
+        let packet_number_length = public_header.packet_number_length as usize;
+
+        if remaining.len() < packet_number_length {
+            bail!(IncompletePacket(Needed::Size(packet_number_length)));
+        }
+
+        let packet_number = E::read_uint(remaining, packet_number_length);
+
+        Ok((
+            QuicPacketHeader {
+                public_header,
+                packet_number,
+            },
+            &remaining[packet_number_length..],
+        ))
+    }
+
+    pub fn write_to<E, B>(&self, buf: &mut B) -> Result<usize, Error>
+    where
+        E: ByteOrder,
+        B: BufMut,
+    {
+        let header_size = self.public_header.write_to::<E, B>(buf)?;
+
+        buf.put_uint::<E>(
+            self.packet_number,
+            self.public_header.packet_number_length as usize,
+        );
+
+        Ok(header_size + self.packet_number_length as usize)
+    }
 }
 
 impl<'a> Deref for QuicPacketHeader<'a> {
@@ -246,7 +315,8 @@ named_args!(parse_public_header(is_server: bool)<QuicPacketPublicHeader>,
                 connection_id,
                 versions: server_version.map(|version| vec![version]),
                 nonce: nonce.map(|nonce| array_ref!(nonce, 0, 32)),
-                packet_number_length: QuicPacketNumberLength::from(QuicPacketNumberLengthFlags::from(packet_number_length_flag)),
+                packet_number_length:
+                    QuicPacketNumberLength::from(QuicPacketNumberLengthFlags::from(packet_number_length_flag)),
             }
         )
     )
@@ -256,6 +326,8 @@ named!(pub quic_version<QuicVersion>, map_res!(take_str!(4), FromStr::from_str))
 
 #[cfg(test)]
 mod tests {
+    use byteorder::NativeEndian;
+
     use super::*;
 
     const kConnectionId: QuicConnectionId = 0xFEDCBA9876543210;
@@ -273,7 +345,10 @@ mod tests {
             parse_public_header(&[0x38], true),
             IResult::Incomplete(Needed::Size(9))
         );
+    }
 
+    #[test]
+    fn packet_header() {
         #[cfg_attr(rustfmt, rustfmt_skip)]
         let packet38 = [
             // public flags (8 byte connection_id)
@@ -294,32 +369,41 @@ mod tests {
             0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC,
         ];
 
+        let packet_header = QuicPacketHeader {
+            public_header: QuicPacketPublicHeader {
+                reset_flag: false,
+                connection_id: Some(kConnectionId),
+                versions: None,
+                nonce: None,
+                packet_number_length: QuicPacketNumberLength::PACKET_6BYTE_PACKET_NUMBER,
+            },
+            packet_number: kPacketNumber,
+        };
+
         assert_eq!(
-            parse_public_header(&packet38, true),
-            IResult::Done(
-                &[0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12][..],
-                QuicPacketPublicHeader {
-                    reset_flag: false,
-                    connection_id: Some(kConnectionId),
-                    versions: None,
-                    nonce: None,
-                    packet_number_length: QuicPacketNumberLength::PACKET_6BYTE_PACKET_NUMBER,
-                }
-            )
+            QuicPacketHeader::parse::<NativeEndian>(&packet38, true).unwrap(),
+            (packet_header.clone(), &[][..],)
         );
 
         assert_eq!(
-            parse_public_header(&packet39, true),
-            IResult::Done(
-                &[0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC][..],
-                QuicPacketPublicHeader {
-                    reset_flag: false,
-                    connection_id: Some(kConnectionId),
-                    versions: None,
-                    nonce: None,
-                    packet_number_length: QuicPacketNumberLength::PACKET_6BYTE_PACKET_NUMBER,
-                }
-            )
+            QuicPacketHeader::parse::<NetworkEndian>(&packet39, true).unwrap(),
+            (packet_header.clone(), &[][..],)
         );
+
+        let mut buf = vec![];
+
+        assert_eq!(
+            packet_header.write_to::<NativeEndian, _>(&mut buf).unwrap(),
+            packet38.len()
+        );
+        assert_eq!(buf.as_slice(), packet38);
+
+        assert_eq!(
+            packet_header
+                .write_to::<NetworkEndian, _>(&mut buf)
+                .unwrap(),
+            packet39.len()
+        );
+        assert_eq!(buf.as_slice(), packet39);
     }
 }
