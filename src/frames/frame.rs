@@ -38,29 +38,29 @@ impl<'a> ReadFrame<'a> for QuicFrame<'a> {
                     .read_frame::<QuicPaddingFrame>(payload)
                     .map(|(frame, remaining)| (QuicFrame::Padding(frame), remaining)),
 
-                QuicFrameType::ResetStream => reader.read_frame::<QuicRstStreamFrame>(payload).map(
-                    |(frame, remaining)| (QuicFrame::ResetStream(frame), remaining),
-                ),
+                QuicFrameType::ResetStream => reader
+                    .read_frame::<QuicRstStreamFrame>(payload)
+                    .map(|(frame, remaining)| (QuicFrame::ResetStream(frame), remaining)),
 
-                QuicFrameType::ConnectionClose => reader.read_frame::<QuicConnectionCloseFrame>(payload).map(
-                    |(frame, remaining)| (QuicFrame::ConnectionClose(frame), remaining),
-                ),
+                QuicFrameType::ConnectionClose => reader
+                    .read_frame::<QuicConnectionCloseFrame>(payload)
+                    .map(|(frame, remaining)| (QuicFrame::ConnectionClose(frame), remaining)),
 
                 QuicFrameType::GoAway => reader
                     .read_frame::<QuicGoAwayFrame>(payload)
                     .map(|(frame, remaining)| (QuicFrame::GoAway(frame), remaining)),
 
-                QuicFrameType::WindowUpdate => reader.read_frame::<QuicWindowUpdateFrame>(payload).map(
-                    |(frame, remaining)| (QuicFrame::WindowUpdate(frame), remaining),
-                ),
+                QuicFrameType::WindowUpdate => reader
+                    .read_frame::<QuicWindowUpdateFrame>(payload)
+                    .map(|(frame, remaining)| (QuicFrame::WindowUpdate(frame), remaining)),
 
                 QuicFrameType::Blocked => reader
                     .read_frame::<QuicBlockedFrame>(payload)
                     .map(|(frame, remaining)| (QuicFrame::Blocked(frame), remaining)),
 
-                QuicFrameType::StopWaiting => reader.read_frame::<QuicStopWaitingFrame>(payload).map(
-                    |(frame, remaining)| (QuicFrame::StopWaiting(frame), remaining),
-                ),
+                QuicFrameType::StopWaiting => reader
+                    .read_frame::<QuicStopWaitingFrame>(payload)
+                    .map(|(frame, remaining)| (QuicFrame::StopWaiting(frame), remaining)),
 
                 QuicFrameType::Ping | QuicFrameType::MtuDiscovery => reader
                     .read_frame::<QuicPingFrame>(payload)

@@ -27,9 +27,9 @@ impl<'a> ReadFrame<'a> for QuicPingFrame {
                 Ok((QuicPingFrame {}, remaining))
             }
             Some((&frame_type, _)) => bail!(QuicError::IllegalFrameType(frame_type)),
-            _ => bail!(QuicError::IncompletePacket(
-                Needed::Size(kQuicFrameTypeSize)
-            )),
+            _ => bail!(QuicError::IncompletePacket(Needed::Size(
+                kQuicFrameTypeSize
+            ))),
         }
     }
 }

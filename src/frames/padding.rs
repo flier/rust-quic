@@ -45,9 +45,9 @@ impl<'a> ReadFrame<'a> for QuicPaddingFrame {
                 ))
             }
             Some((&frame_type, _)) => bail!(QuicError::IllegalFrameType(frame_type)),
-            _ => bail!(QuicError::IncompletePacket(
-                Needed::Size(kQuicFrameTypeSize)
-            )),
+            _ => bail!(QuicError::IncompletePacket(Needed::Size(
+                kQuicFrameTypeSize
+            ))),
         }
     }
 }
