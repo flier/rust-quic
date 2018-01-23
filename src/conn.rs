@@ -72,10 +72,9 @@ where
     where
         P: 'static + Perspective,
     {
-        let framer = Rc::new(RefCell::new(QuicFramer::new::<P>(
-            supported_versions,
-            time::get_time(),
-        )));
+        let framer = Rc::new(RefCell::new(
+            QuicFramer::new::<P>(supported_versions, time::get_time()),
+        ));
         let inner = Rc::new(Inner {
             connection_id,
             is_server: P::is_server(),
@@ -298,15 +297,7 @@ where
             visitor.on_packet_received(self_addr, peer_addr, &packet)
         }
 
-        self.state.borrow_mut().last_packet_source_address = Some(self_addr.clone());
-        self.state.borrow_mut().last_packet_destination_address = Some(peer_addr.clone());
-
-        if self.state.borrow().self_addr.is_none() {
-            self.state.borrow_mut().self_addr = Some(self_addr.clone());
-        }
-        if self.state.borrow().peer_addr.is_none() {
-            self.state.borrow_mut().peer_addr = Some(peer_addr.clone());
-        }
+        self.state.borrow_mut().update_address(self_addr, peer_addr);
 
         self.stats.bytes_received.inc_by(packet.len() as f64)?;
         self.stats.packets_received.inc();
@@ -368,13 +359,12 @@ where
     /// Selects the version of the protocol being used
     /// by selecting a version from `available_versions` which is also supported.
     fn select_mutual_version(&self, available_versions: &[QuicVersion]) -> Option<QuicVersion> {
-        for &version in self.framer.borrow().supported_versions {
-            if available_versions.contains(&version) {
-                return Some(version);
-            }
-        }
-
-        None
+        self.framer
+            .borrow()
+            .supported_versions
+            .iter()
+            .find(|&version| available_versions.contains(version))
+            .cloned()
     }
 
     // Sends a version negotiation packet to the peer.
@@ -387,6 +377,7 @@ where
     /// changes.
     fn retransmit_unacked_packets(&self, retransmission_type: TransmissionType) {}
 }
+
 /// The state of connection in version negotiation finite state machine.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum QuicVersionNegotiationState {
@@ -475,6 +466,18 @@ impl State {
         trace!("queueing undecryptable packet");
 
         self.undecryptable_packets.push(packet)
+    }
+
+    pub fn update_address(&mut self, self_addr: &SocketAddr, peer_addr: &SocketAddr) {
+        self.last_packet_source_address = Some(self_addr.clone());
+        self.last_packet_destination_address = Some(peer_addr.clone());
+
+        if self.self_addr.is_none() {
+            self.self_addr = Some(self_addr.clone());
+        }
+        if self.peer_addr.is_none() {
+            self.peer_addr = Some(peer_addr.clone());
+        }
     }
 }
 
