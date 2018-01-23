@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::cmp;
 use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::rc::Rc;
+use std::ops::Deref;
 
 use byteorder::{ByteOrder, NativeEndian, NetworkEndian};
 use bytes::{BufMut, Bytes};
@@ -123,8 +123,9 @@ pub trait QuicFramerVisitor {
 /// Class for parsing and constructing QUIC packets.
 ///
 /// It has a `QuicFramerVisitor` that is called when packets are parsed.
-pub struct QuicFramer<'a, V>
+pub struct QuicFramer<'a, T, V>
 where
+    T: 'a + Deref<Target = V>,
     V: 'a,
 {
     pub supported_versions: &'a [QuicVersion],
@@ -132,12 +133,13 @@ where
     /// The time this framer was created.
     /// Time written to the wire will be written as a delta from this value.
     pub creation_time: QuicTime,
-    visitor: Option<Rc<V>>,
+    visitor: Option<T>,
     state: RefCell<State>,
 }
 
-impl<'a, V> QuicFramer<'a, V>
+impl<'a, T, V> QuicFramer<'a, T, V>
 where
+    T: 'a + Deref<Target = V>,
     V: 'a,
 {
     pub fn new<P>(supported_versions: &'a [QuicVersion], creation_time: QuicTime) -> Self
@@ -154,8 +156,9 @@ where
     }
 }
 
-impl<'a, V> QuicFramer<'a, V>
+impl<'a, T, V> QuicFramer<'a, T, V>
 where
+    T: 'a + Deref<Target = V>,
     V: 'a + QuicFramerVisitor,
 {
     // Returns true if |version| is a supported protocol version.
@@ -164,7 +167,7 @@ where
     }
 
     /// Set callbacks to be called from the framer.
-    pub fn set_visitor(&mut self, visitor: Rc<V>) {
+    pub fn set_visitor(&mut self, visitor: T) {
         self.visitor = Some(visitor);
     }
 
@@ -255,10 +258,9 @@ where
         );
 
         if message.tag() != kPRST {
-            bail!(InvalidResetPacket(format!(
-                "incorrect message tag: {}",
-                message.tag()
-            )));
+            bail!(InvalidResetPacket(
+                format!("incorrect message tag: {}", message.tag())
+            ));
         }
 
         let packet = QuicPublicResetPacket {
@@ -629,25 +631,30 @@ impl State {
     }
 }
 
-struct FrameReader<'a, 'p, V>
+struct FrameReader<'a, 'p, T, V>
 where
+    T: 'a + Deref<Target = V>,
     V: 'a,
 {
-    framer: &'a QuicFramer<'a, V>,
+    framer: &'a QuicFramer<'a, T, V>,
     header: &'p QuicPacketHeader<'p>,
 }
 
-impl<'a, 'p, V> FrameReader<'a, 'p, V>
+impl<'a, 'p, T, V> FrameReader<'a, 'p, T, V>
 where
+    T: 'a + Deref<Target = V>,
     V: 'a,
     'a: 'p,
 {
-    pub fn new(framer: &'a QuicFramer<'a, V>, header: &'p QuicPacketHeader<'p>) -> FrameReader<'a, 'p, V> {
+    pub fn new(framer: &'a QuicFramer<'a, T, V>, header: &'p QuicPacketHeader<'p>) -> FrameReader<'a, 'p, T, V> {
         FrameReader { framer, header }
     }
 }
 
-impl<'a, 'p, V> QuicFrameReader<'a> for FrameReader<'a, 'p, V> {
+impl<'a, 'p, T, V> QuicFrameReader<'a> for FrameReader<'a, 'p, T, V>
+where
+    T: Deref<Target = V>,
+{
     fn packet_header(&self) -> &QuicPacketHeader {
         self.header
     }
@@ -665,24 +672,29 @@ impl<'a, 'p, V> QuicFrameReader<'a> for FrameReader<'a, 'p, V> {
     }
 }
 
-struct FrameWriter<'a, V>
+struct FrameWriter<'a, T, V>
 where
+    T: 'a + Deref<Target = V>,
     V: 'a,
 {
-    framer: &'a QuicFramer<'a, V>,
+    framer: &'a QuicFramer<'a, T, V>,
     header: &'a QuicPacketHeader<'a>,
 }
 
-impl<'a, V> FrameWriter<'a, V>
+impl<'a, T, V> FrameWriter<'a, T, V>
 where
+    T: 'a + Deref<Target = V>,
     V: 'a,
 {
-    pub fn new(framer: &'a QuicFramer<'a, V>, header: &'a QuicPacketHeader<'a>) -> FrameWriter<'a, V> {
+    pub fn new(framer: &'a QuicFramer<'a, T, V>, header: &'a QuicPacketHeader<'a>) -> FrameWriter<'a, T, V> {
         FrameWriter { framer, header }
     }
 }
 
-impl<'a, V> QuicFrameWriter<'a> for FrameWriter<'a, V> {
+impl<'a, T, V> QuicFrameWriter<'a> for FrameWriter<'a, T, V>
+where
+    T: Deref<Target = V>,
+{
     fn packet_header(&self) -> &QuicPacketHeader {
         self.header
     }

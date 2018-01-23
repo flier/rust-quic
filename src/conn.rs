@@ -112,7 +112,7 @@ where
     is_server: bool,
     visitor: Option<&'a V>,
     debug_visitor: Option<&'a D>,
-    framer: Rc<RefCell<QuicFramer<'a, Inner<'a, V, D>>>>,
+    framer: Rc<RefCell<QuicFramer<'a, Rc<Inner<'a, V, D>>, Inner<'a, V, D>>>>,
     stats: QuicConnectionStats,
     state: RefCell<State>,
 }
