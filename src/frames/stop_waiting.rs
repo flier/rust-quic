@@ -3,8 +3,8 @@ use bytes::BufMut;
 use failure::Error;
 use nom::IResult;
 
-use constants::kQuicFrameTypeSize;
 use errors::QuicError;
+use framer::kQuicFrameTypeSize;
 use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
 use proto::{QuicPacketNumber, QuicPacketNumberLength};
 use types::{QuicFrameType, QuicVersion};
@@ -16,7 +16,7 @@ use types::{QuicFrameType, QuicVersion};
 #[derive(Clone, Debug, PartialEq)]
 pub struct QuicStopWaitingFrame {
     /// The lowest packet we've sent which is unacked, and we expect an ack for.
-    least_unacked: QuicPacketNumber,
+    pub least_unacked: QuicPacketNumber,
 }
 
 impl<'a> ReadFrame<'a> for QuicStopWaitingFrame {

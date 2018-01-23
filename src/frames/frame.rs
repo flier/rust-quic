@@ -3,10 +3,12 @@ use bytes::BufMut;
 use failure::Error;
 use nom::Needed;
 
+use errors::{QuicErrorCode, QuicRstStreamErrorCode};
 use errors::QuicError::IncompletePacket;
-use frames::{QuicAckFrame, QuicBlockedFrame, QuicConnectionCloseFrame, QuicFrameReader, QuicFrameWriter,
+use frames::{PaddingBytes, QuicAckFrame, QuicBlockedFrame, QuicConnectionCloseFrame, QuicFrameReader, QuicFrameWriter,
              QuicGoAwayFrame, QuicPaddingFrame, QuicPingFrame, QuicRstStreamFrame, QuicStopWaitingFrame,
              QuicStreamFrame, QuicWindowUpdateFrame, ReadFrame, WriteFrame};
+use proto::{QuicPacketNumber, QuicStreamId, QuicStreamOffset};
 use types::QuicFrameType;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -21,6 +23,166 @@ pub enum QuicFrame<'a> {
     Ping(QuicPingFrame),
     Stream(QuicStreamFrame<'a>),
     Ack(QuicAckFrame),
+}
+
+impl<'a> QuicFrame<'a> {
+    pub fn padding(padding_bytes: PaddingBytes) -> Self {
+        QuicFrame::Padding(QuicPaddingFrame { padding_bytes })
+    }
+
+    pub fn reset_stream(
+        stream_id: QuicStreamId,
+        error_code: QuicRstStreamErrorCode,
+        byte_offset: QuicStreamOffset,
+    ) -> Self {
+        QuicFrame::ResetStream(QuicRstStreamFrame {
+            stream_id,
+            error_code,
+            byte_offset,
+        })
+    }
+
+    pub fn connection_close(error_code: QuicErrorCode, error_details: Option<&'a str>) -> Self {
+        QuicFrame::ConnectionClose(QuicConnectionCloseFrame {
+            error_code,
+            error_details,
+        })
+    }
+
+    pub fn go_away(
+        error_code: QuicErrorCode,
+        last_good_stream_id: Option<QuicStreamId>,
+        reason_phrase: Option<&'a str>,
+    ) -> Self {
+        QuicFrame::GoAway(QuicGoAwayFrame {
+            error_code,
+            last_good_stream_id,
+            reason_phrase,
+        })
+    }
+
+    pub fn window_update(stream_id: QuicStreamId, byte_offset: QuicStreamOffset) -> Self {
+        QuicFrame::WindowUpdate(QuicWindowUpdateFrame {
+            stream_id,
+            byte_offset,
+        })
+    }
+
+    pub fn blocked(stream_id: QuicStreamId) -> Self {
+        QuicFrame::Blocked(QuicBlockedFrame { stream_id })
+    }
+
+    pub fn stop_waiting(least_unacked: QuicPacketNumber) -> Self {
+        QuicFrame::StopWaiting(QuicStopWaitingFrame { least_unacked })
+    }
+
+    pub fn ping() -> Self {
+        QuicFrame::Ping(QuicPingFrame {})
+    }
+
+    pub fn stream(stream_id: QuicStreamId, offset: QuicStreamOffset, fin: bool, data: Option<&'a [u8]>) -> Self {
+        QuicFrame::Stream(QuicStreamFrame {
+            stream_id,
+            offset,
+            fin,
+            data,
+        })
+    }
+
+    pub fn frame_type(&self) -> QuicFrameType {
+        match *self {
+            QuicFrame::Padding(_) => QuicFrameType::Padding,
+            QuicFrame::ResetStream(_) => QuicFrameType::ResetStream,
+            QuicFrame::ConnectionClose(_) => QuicFrameType::ConnectionClose,
+            QuicFrame::GoAway(_) => QuicFrameType::GoAway,
+            QuicFrame::WindowUpdate(_) => QuicFrameType::WindowUpdate,
+            QuicFrame::Blocked(_) => QuicFrameType::Blocked,
+            QuicFrame::StopWaiting(_) => QuicFrameType::StopWaiting,
+            QuicFrame::Ping(_) => QuicFrameType::Ping,
+            QuicFrame::Stream(_) => QuicFrameType::Stream,
+            QuicFrame::Ack(_) => QuicFrameType::Ack,
+        }
+    }
+
+    pub fn as_padding_frame(&self) -> Option<&QuicPaddingFrame> {
+        if let QuicFrame::Padding(ref frame) = *self {
+            Some(frame)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_reset_stream_frame(&self) -> Option<&QuicRstStreamFrame> {
+        if let QuicFrame::ResetStream(ref frame) = *self {
+            Some(frame)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_connection_close_frame(&self) -> Option<&QuicConnectionCloseFrame> {
+        if let QuicFrame::ConnectionClose(ref frame) = *self {
+            Some(frame)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_go_away_frame(&self) -> Option<&QuicGoAwayFrame> {
+        if let QuicFrame::GoAway(ref frame) = *self {
+            Some(frame)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_window_update_frame(&self) -> Option<&QuicWindowUpdateFrame> {
+        if let QuicFrame::WindowUpdate(ref frame) = *self {
+            Some(frame)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_blocked_frame(&self) -> Option<&QuicBlockedFrame> {
+        if let QuicFrame::Blocked(ref frame) = *self {
+            Some(frame)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_stop_waiting_frame(&self) -> Option<&QuicStopWaitingFrame> {
+        if let QuicFrame::StopWaiting(ref frame) = *self {
+            Some(frame)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_ping_frame(&self) -> Option<&QuicPingFrame> {
+        if let QuicFrame::Ping(ref frame) = *self {
+            Some(frame)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_stream_frame(&self) -> Option<&QuicStreamFrame> {
+        if let QuicFrame::Stream(ref frame) = *self {
+            Some(frame)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_ack_frame(&self) -> Option<&QuicAckFrame> {
+        if let QuicFrame::Ack(ref frame) = *self {
+            Some(frame)
+        } else {
+            None
+        }
+    }
 }
 
 impl<'a> ReadFrame<'a> for QuicFrame<'a> {
@@ -38,29 +200,29 @@ impl<'a> ReadFrame<'a> for QuicFrame<'a> {
                     .read_frame::<QuicPaddingFrame>(payload)
                     .map(|(frame, remaining)| (QuicFrame::Padding(frame), remaining)),
 
-                QuicFrameType::ResetStream => reader
-                    .read_frame::<QuicRstStreamFrame>(payload)
-                    .map(|(frame, remaining)| (QuicFrame::ResetStream(frame), remaining)),
+                QuicFrameType::ResetStream => reader.read_frame::<QuicRstStreamFrame>(payload).map(
+                    |(frame, remaining)| (QuicFrame::ResetStream(frame), remaining),
+                ),
 
-                QuicFrameType::ConnectionClose => reader
-                    .read_frame::<QuicConnectionCloseFrame>(payload)
-                    .map(|(frame, remaining)| (QuicFrame::ConnectionClose(frame), remaining)),
+                QuicFrameType::ConnectionClose => reader.read_frame::<QuicConnectionCloseFrame>(payload).map(
+                    |(frame, remaining)| (QuicFrame::ConnectionClose(frame), remaining),
+                ),
 
                 QuicFrameType::GoAway => reader
                     .read_frame::<QuicGoAwayFrame>(payload)
                     .map(|(frame, remaining)| (QuicFrame::GoAway(frame), remaining)),
 
-                QuicFrameType::WindowUpdate => reader
-                    .read_frame::<QuicWindowUpdateFrame>(payload)
-                    .map(|(frame, remaining)| (QuicFrame::WindowUpdate(frame), remaining)),
+                QuicFrameType::WindowUpdate => reader.read_frame::<QuicWindowUpdateFrame>(payload).map(
+                    |(frame, remaining)| (QuicFrame::WindowUpdate(frame), remaining),
+                ),
 
                 QuicFrameType::Blocked => reader
                     .read_frame::<QuicBlockedFrame>(payload)
                     .map(|(frame, remaining)| (QuicFrame::Blocked(frame), remaining)),
 
-                QuicFrameType::StopWaiting => reader
-                    .read_frame::<QuicStopWaitingFrame>(payload)
-                    .map(|(frame, remaining)| (QuicFrame::StopWaiting(frame), remaining)),
+                QuicFrameType::StopWaiting => reader.read_frame::<QuicStopWaitingFrame>(payload).map(
+                    |(frame, remaining)| (QuicFrame::StopWaiting(frame), remaining),
+                ),
 
                 QuicFrameType::Ping | QuicFrameType::MtuDiscovery => reader
                     .read_frame::<QuicPingFrame>(payload)

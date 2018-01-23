@@ -15,13 +15,41 @@ use constants::kMaxPacketSize;
 use crypto::{CryptoHandshakeMessage, NullDecrypter, NullEncrypter, QuicDecrypter, QuicEncrypter, kCADR, kPRST, kRNON};
 use errors::QuicError;
 use errors::QuicError::*;
-use frames::{QuicAckFrame, QuicBlockedFrame, QuicConnectionCloseFrame, QuicFrame, QuicFrameReader, QuicFrameWriter,
-             QuicGoAwayFrame, QuicPaddingFrame, QuicPingFrame, QuicRstStreamFrame, QuicStopWaitingFrame,
-             QuicStreamFrame, QuicWindowUpdateFrame};
+use frames::{PaddingBytes, QuicAckFrame, QuicBlockedFrame, QuicConnectionCloseFrame, QuicFrame, QuicFrameContext,
+             QuicFrameReader, QuicFrameWriter, QuicGoAwayFrame, QuicPaddingFrame, QuicPingFrame, QuicRstStreamFrame,
+             QuicStopWaitingFrame, QuicStreamFrame, QuicWindowUpdateFrame};
 use packet::{quic_version, QuicEncryptedPacket, QuicPacketHeader, QuicPacketPublicHeader, QuicPublicResetPacket,
              QuicVersionNegotiationPacket};
 use proto::QuicPacketNumber;
 use types::{EncryptionLevel, Perspective, QuicTime, QuicTimeDelta, QuicVersion, ToEndianness, ToQuicPacketNumber};
+
+// Number of bytes reserved for the frame type preceding each frame.
+pub const kQuicFrameTypeSize: usize = 1;
+// Number of bytes reserved for error code.
+pub const kQuicErrorCodeSize: usize = 4;
+// Number of bytes reserved to denote the length of error details field.
+pub const kQuicErrorDetailsLengthSize: usize = 2;
+
+// Maximum number of bytes reserved for stream id.
+pub const kQuicMaxStreamIdSize: usize = 4;
+// Maximum number of bytes reserved for byte offset in stream frame.
+pub const kQuicMaxStreamOffsetSize: usize = 8;
+// Number of bytes reserved to store payload length in stream frame.
+pub const kQuicStreamPayloadLengthSize: usize = 2;
+
+// Size in bytes reserved for the delta time of the largest observed
+// packet number in ack frames.
+pub const kQuicDeltaTimeLargestObservedSize: usize = 2;
+// Size in bytes reserved for the number of received packets with timestamps.
+pub const kQuicNumTimestampsSize: usize = 1;
+// Size in bytes reserved for the number of missing packets in ack frames.
+pub const kNumberOfNackRangesSize: usize = 1;
+// Size in bytes reserved for the number of ack blocks in ack frames.
+pub const kNumberOfAckBlocksSize: usize = 1;
+// Maximum number of missing packet ranges that can fit within an ack frame.
+pub const kMaxNackRanges: usize = (1 << (kNumberOfNackRangesSize * 8)) - 1;
+// Maximum number of ack blocks that can fit within an ack frame.
+pub const kMaxAckBlocks: usize = (1 << (kNumberOfAckBlocksSize * 8)) - 1;
 
 pub trait QuicFramerVisitor {
     /// Called when a new packet has been received, before it has been validated or processed.
@@ -134,7 +162,7 @@ where
     /// Time written to the wire will be written as a delta from this value.
     pub creation_time: QuicTime,
     /// Encrypters used to encrypt packets via encrypt_payload().
-    pub encrypter: [Option<Box<QuicEncrypter>>; 3],
+    pub encrypters: [Option<Box<QuicEncrypter>>; 3],
     visitor: Option<T>,
     state: RefCell<State>,
 }
@@ -152,7 +180,7 @@ where
             supported_versions,
             quic_version: supported_versions[0],
             creation_time,
-            encrypter: [Some(Box::new(NullEncrypter::<P>::default())), None, None],
+            encrypters: [Some(Box::new(NullEncrypter::<P>::default())), None, None],
             visitor: None,
             state: RefCell::new(State::new::<P>()),
         }
@@ -160,20 +188,18 @@ where
 
     /// Changes the encrypter used for level `level` to `encrypter`.
     pub fn set_encrypter(&mut self, level: EncryptionLevel, encrypter: Box<QuicEncrypter>) {
-        self.encrypter[level as usize] = Some(encrypter);
+        self.encrypters[level as usize] = Some(encrypter);
     }
 
-    /// Encrypts a payload in `buf`.
-    /// `ad_len` is the length of the associated data.
-    /// `total_len` is the length of the associated data plus plaintext.
-    pub fn encrypt_in_place(
+    /// Encrypts a payload.
+    pub fn encrypt_payload(
         &self,
         level: EncryptionLevel,
         packet_number: QuicPacketNumber,
         associated_data: &[u8],
         plain_text: &[u8],
     ) -> Result<Bytes, Error> {
-        if let Some(encrypter) = self.encrypter[level as usize].as_ref() {
+        if let Some(encrypter) = self.encrypters[level as usize].as_ref() {
             encrypter.encrypt_packet(
                 self.quic_version,
                 packet_number,
@@ -182,6 +208,60 @@ where
             )
         } else {
             bail!(QuicError::EncryptionFailure(packet_number))
+        }
+    }
+
+    /// Returns the maximum length of plaintext
+    /// that can be encrypted to ciphertext no larger than `ciphertext_size`.
+    pub fn max_plaintext_size(&self, ciphertext_size: usize) -> usize {
+        self.encrypters
+            .iter()
+            .flat_map(|encrypter| encrypter)
+            .fold(ciphertext_size, |min_plaintext_size, encrypter| {
+                cmp::min(
+                    min_plaintext_size,
+                    encrypter.max_plaintext_size(ciphertext_size),
+                )
+            })
+    }
+
+    /// Returns the number of bytes added to the packet for the specified frame,
+    /// and 0 if the frame doesn't fit.
+    /// Includes the header size for the first frame.
+    pub fn serialized_frame_length(
+        &self,
+        frame: &QuicFrame<'a>,
+        free_bytes: usize,
+        first_frame: bool,
+        frame_size: usize,
+    ) -> usize {
+        match *frame {
+            QuicFrame::Padding(QuicPaddingFrame { padding_bytes }) => {
+                match padding_bytes {
+                    PaddingBytes::Size(num_padding_bytes) => {
+                        // Lite padding.
+                        cmp::min(free_bytes, num_padding_bytes)
+                    }
+                    PaddingBytes::Fill => {
+                        // Full padding to the end of the packet.
+                        free_bytes
+                    }
+                }
+            }
+            QuicFrame::Ack(ref frame) if first_frame && frame.min_size(self.quic_version) <= free_bytes => {
+                // Truncate the frame so the packet will not exceed kMaxPacketSize.
+                // Note that we may not use every byte of the writer in this case.
+                free_bytes
+            }
+            _ => {
+                if frame_size <= free_bytes {
+                    // Frame fits within packet. Note that acks may be truncated.
+                    frame_size
+                } else {
+                    // Only truncate the first frame in a packet, so if subsequent ones go over, stop including more frames.
+                    0
+                }
+            }
         }
     }
 }
@@ -288,10 +368,9 @@ where
         );
 
         if message.tag() != kPRST {
-            bail!(InvalidResetPacket(format!(
-                "incorrect message tag: {}",
-                message.tag()
-            )));
+            bail!(InvalidResetPacket(
+                format!("incorrect message tag: {}", message.tag())
+            ));
         }
 
         let packet = QuicPublicResetPacket {
@@ -672,27 +751,26 @@ impl State {
     }
 }
 
-struct FrameReader<'a, 'p, T, V>
+pub struct FrameContext<'a, T, V>
 where
     T: 'a + Deref<Target = V>,
     V: 'a,
 {
     framer: &'a QuicFramer<'a, T, V>,
-    header: &'p QuicPacketHeader<'p>,
+    header: &'a QuicPacketHeader<'a>,
 }
 
-impl<'a, 'p, T, V> FrameReader<'a, 'p, T, V>
+impl<'a, T, V> FrameContext<'a, T, V>
 where
     T: 'a + Deref<Target = V>,
     V: 'a,
-    'a: 'p,
 {
-    pub fn new(framer: &'a QuicFramer<'a, T, V>, header: &'p QuicPacketHeader<'p>) -> FrameReader<'a, 'p, T, V> {
-        FrameReader { framer, header }
+    pub fn new(framer: &'a QuicFramer<'a, T, V>, header: &'a QuicPacketHeader<'a>) -> FrameContext<'a, T, V> {
+        FrameContext { framer, header }
     }
 }
 
-impl<'a, 'p, T, V> QuicFrameReader<'a> for FrameReader<'a, 'p, T, V>
+impl<'a, T, V> QuicFrameContext for FrameContext<'a, T, V>
 where
     T: Deref<Target = V>,
 {
@@ -713,40 +791,22 @@ where
     }
 }
 
-struct FrameWriter<'a, T, V>
+pub type FrameReader<'a, T, V> = FrameContext<'a, T, V>;
+
+impl<'a, T, V> QuicFrameReader<'a> for FrameReader<'a, T, V>
 where
     T: 'a + Deref<Target = V>,
     V: 'a,
 {
-    framer: &'a QuicFramer<'a, T, V>,
-    header: &'a QuicPacketHeader<'a>,
 }
 
-impl<'a, T, V> FrameWriter<'a, T, V>
-where
-    T: 'a + Deref<Target = V>,
-    V: 'a,
-{
-    pub fn new(framer: &'a QuicFramer<'a, T, V>, header: &'a QuicPacketHeader<'a>) -> FrameWriter<'a, T, V> {
-        FrameWriter { framer, header }
-    }
-}
+pub type FrameWriter<'a, T, V> = FrameContext<'a, T, V>;
 
 impl<'a, T, V> QuicFrameWriter<'a> for FrameWriter<'a, T, V>
 where
-    T: Deref<Target = V>,
+    T: 'a + Deref<Target = V>,
+    V: 'a,
 {
-    fn packet_header(&self) -> &QuicPacketHeader {
-        self.header
-    }
-
-    fn quic_version(&self) -> QuicVersion {
-        self.framer.quic_version
-    }
-
-    fn creation_time(&self) -> QuicTime {
-        self.framer.creation_time
-    }
 }
 
 named!(

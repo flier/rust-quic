@@ -55,6 +55,22 @@ where
 
         Ok(buf.freeze())
     }
+
+    fn key_size(&self) -> usize {
+        0
+    }
+
+    fn nonce_prefix_size(&self) -> usize {
+        0
+    }
+
+    fn max_plaintext_size(&self, ciphertext_size: usize) -> usize {
+        ciphertext_size - kHashSizeShort
+    }
+
+    fn ciphertext_size(&self, plaintext_size: usize) -> usize {
+        plaintext_size + kHashSizeShort
+    }
 }
 
 /// A `NullDecrypter` is a `QuicDecrypter` used before a crypto negotiation has occurred.

@@ -3,20 +3,24 @@ use std::cmp;
 use std::iter;
 use std::mem;
 
-use byteorder::{ByteOrder, NativeEndian, NetworkEndian};
+use byteorder::ByteOrder;
 use bytes::BufMut;
 use failure::{Error, Fail};
 use nom::{self, IResult, Needed, be_u8};
 use time::Duration;
 
-use constants::{kQuicFrameTypeAckMask, kQuicFrameTypeAckMask_Pre40, kQuicFrameTypeSize};
+use constants::{kQuicFrameTypeAckMask, kQuicFrameTypeAckMask_Pre40};
 use errors::ParseError::*;
 use errors::QuicError::{self, IncompletePacket};
+use framer::{kMaxAckBlocks, kNumberOfAckBlocksSize, kQuicDeltaTimeLargestObservedSize, kQuicFrameTypeSize,
+             kQuicNumTimestampsSize};
 use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
 use proto::{QuicPacketNumber, QuicPacketNumberLength, QuicPacketNumberLengthFlags};
 use types::{QuicTime, QuicTimeDelta, QuicVersion, ToQuicTimeDelta, UFloat16, ufloat16};
 
 const MAX_U8: u64 = u8::MAX as u64;
+
+const kQuicAckBlockGapSize: usize = 1;
 
 // packet number size shift used in AckFrames.
 const kQuicSequenceNumberLengthNumBits: usize = 2;
@@ -135,28 +139,28 @@ impl QuicAckFrame {
         }
     }
 
+    pub fn min_size(&self, quic_version: QuicVersion) -> usize {
+        // Frame Type:
+        kQuicFrameTypeSize +
+        // Largest Acked
+        QuicPacketNumberLength::for_packet_number(quic_version, self.largest_observed) as usize +
+        // Largest Acked Delta Time
+        kQuicDeltaTimeLargestObservedSize +
+        // Timestamp Section
+        kQuicNumTimestampsSize
+    }
+
     pub fn size(&self, quic_version: QuicVersion) -> usize {
         // Frame Type:
         kQuicFrameTypeSize +
         // Largest Acked
         QuicPacketNumberLength::for_packet_number(quic_version, self.largest_observed) as usize +
         // Largest Acked Delta Time
-        mem::size_of::<u16>() +
+        kQuicDeltaTimeLargestObservedSize +
         // Ack Block
         self.ack_blocks_size(quic_version) +
         // Timestamp Section
         self.timestamps_size()
-    }
-
-    fn write_frame<T>(&self, quic_version: QuicVersion, creation_time: QuicTime, buf: &mut T) -> Result<usize, Error>
-    where
-        T: BufMut,
-    {
-        if quic_version > QuicVersion::QUIC_VERSION_38 {
-            self.write_to::<NetworkEndian, T>(quic_version, creation_time, buf)
-        } else {
-            self.write_to::<NativeEndian, T>(quic_version, creation_time, buf)
-        }
     }
 
     fn write_to<E, T>(&self, quic_version: QuicVersion, creation_time: QuicTime, buf: &mut T) -> Result<usize, Error>
@@ -201,24 +205,25 @@ impl QuicAckFrame {
         // Frame Type
         buf.put_u8(flags);
 
-        frame_size += 1;
+        frame_size += kQuicFrameTypeSize;
 
         if quic_version > QuicVersion::QUIC_VERSION_39 {
             if num_ack_blocks > 0 {
                 // Number of ack blocks.
                 buf.put_u8(num_ack_blocks);
 
-                frame_size += 1;
+                frame_size += kNumberOfAckBlocksSize;
             }
 
             // Number of timestamps
             if buf.remaining_mut() >= self.size(quic_version) {
-                buf.put_u8(self.received_packet_times.as_ref().map_or(0, |v| v.len()) as u8);
+                buf.put_u8(self.received_packet_times.as_ref().map_or(0, |v| v.len())
+                    as u8);
             } else {
                 buf.put_u8(0);
             }
 
-            frame_size += 1;
+            frame_size += kQuicNumTimestampsSize;
         }
 
         // Largest Acked
@@ -234,14 +239,14 @@ impl QuicAckFrame {
                 .unwrap_or(u64::MAX),
         )));
 
-        frame_size += 2;
+        frame_size += kQuicDeltaTimeLargestObservedSize;
 
         if quic_version <= QuicVersion::QUIC_VERSION_39 {
             if num_ack_blocks > 0 {
                 // Number of ack blocks.
                 buf.put_u8(num_ack_blocks);
 
-                frame_size += 1;
+                frame_size += kNumberOfAckBlocksSize;
             }
         }
 
@@ -255,7 +260,7 @@ impl QuicAckFrame {
                 buf.put_u8(gap);
                 buf.put_uint::<E>(block_length, ack_block_length as usize);
 
-                frame_size += 1 + ack_block_length as usize;
+                frame_size += kQuicAckBlockGapSize + ack_block_length as usize;
             }
         }
 
@@ -263,12 +268,13 @@ impl QuicAckFrame {
         if quic_version <= QuicVersion::QUIC_VERSION_39 {
             // Number of timestamps
             if buf.remaining_mut() >= self.size(quic_version) {
-                buf.put_u8(self.received_packet_times.as_ref().map_or(0, |v| v.len()) as u8);
+                buf.put_u8(self.received_packet_times.as_ref().map_or(0, |v| v.len())
+                    as u8);
             } else {
                 buf.put_u8(0);
             }
 
-            frame_size += 1;
+            frame_size += kQuicNumTimestampsSize;
         }
 
         // Use the lowest 4 bytes of the time delta from the creation_time_.
@@ -325,14 +331,16 @@ impl QuicAckFrame {
         match self.packets
             .ranges
             .iter()
-            .fold(
-                (0, self.largest_observed + 1),
-                |(acc, last), &(min, max)| (acc + (last - max) / MAX_U8 + 1, min),
-            )
+            .fold((0, self.largest_observed + 1), |(acc, last), &(min, max)| {
+                (acc + (last - max) / MAX_U8 + 1, min)
+            })
             .0
         {
             0 | 1 => ack_block_length,
-            n => mem::size_of::<u8>() + ack_block_length + (n as usize - 1) * (1 + ack_block_length),
+            n => {
+                kNumberOfAckBlocksSize + ack_block_length
+                    + cmp::min(n as usize - 1, kMaxAckBlocks) * (kQuicAckBlockGapSize + ack_block_length)
+            }
         }
     }
 
@@ -470,7 +478,7 @@ impl PacketNumberQueue {
 mod tests {
     use time;
 
-    use frames::mocks;
+    use frames::{mocks, QuicFrameContext};
 
     use super::*;
 
@@ -567,9 +575,11 @@ mod tests {
                 quic_version,
             );
             assert_eq!(
-                &buf, &payload,
+                &buf,
+                &payload,
                 "write ACK frame {:?}, version {:?}",
-                ack_frame, quic_version
+                ack_frame,
+                quic_version
             );
         }
     }
@@ -735,9 +745,11 @@ mod tests {
                 quic_version,
             );
             assert_eq!(
-                &buf, &payload,
+                &buf,
+                &payload,
                 "write ACK frame {:?}, version {:?}",
-                ack_frame, quic_version
+                ack_frame,
+                quic_version
             );
         }
     }
@@ -925,9 +937,11 @@ mod tests {
                 quic_version,
             );
             assert_eq!(
-                &buf, &payload,
+                &buf,
+                &payload,
                 "write ACK frame {:?}, version {:?}",
-                ack_frame, quic_version
+                ack_frame,
+                quic_version
             );
         }
     }

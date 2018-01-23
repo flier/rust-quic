@@ -1,12 +1,10 @@
-use std::mem;
-
 use byteorder::ByteOrder;
 use bytes::BufMut;
 use failure::Error;
 use nom::IResult;
 
-use constants::kQuicFrameTypeSize;
 use errors::QuicError;
+use framer::{kQuicFrameTypeSize, kQuicMaxStreamIdSize, kQuicMaxStreamOffsetSize};
 use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
 use proto::{QuicStreamId, QuicStreamOffset};
 use types::{QuicFrameType, QuicVersion};
@@ -19,11 +17,11 @@ pub struct QuicWindowUpdateFrame {
     /// The stream this frame applies to.
     ///
     /// 0 is a special case meaning the overall connection rather than a specific stream.
-    stream_id: QuicStreamId,
+    pub stream_id: QuicStreamId,
     /// Byte offset in the stream or connection.
     ///
     /// The receiver of this frame must not send data which would result in this offset being exceeded.
-    byte_offset: QuicStreamOffset,
+    pub byte_offset: QuicStreamOffset,
 }
 
 impl<'a> ReadFrame<'a> for QuicWindowUpdateFrame {
@@ -53,9 +51,9 @@ impl<'a> WriteFrame<'a> for QuicWindowUpdateFrame {
         // Frame Type
         kQuicFrameTypeSize +
         // Stream ID
-        mem::size_of::<QuicStreamId>() +
+        kQuicMaxStreamIdSize +
         // Byte offset
-        mem::size_of::<QuicStreamOffset>()
+        kQuicMaxStreamOffsetSize
     }
 
     fn write_frame<E, W, B>(&self, writer: &W, buf: &mut B) -> Result<usize, Self::Error>

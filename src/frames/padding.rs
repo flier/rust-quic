@@ -3,7 +3,7 @@ use bytes::BufMut;
 use failure::Error;
 use nom::Needed;
 
-use constants::kQuicFrameTypeSize;
+use framer::kQuicFrameTypeSize;
 use errors::QuicError;
 use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
 use types::{QuicFrameType, QuicVersion};
@@ -12,12 +12,6 @@ use types::{QuicFrameType, QuicVersion};
 pub enum PaddingBytes {
     Size(usize),
     Fill,
-}
-
-impl Default for PaddingBytes {
-    fn default() -> Self {
-        PaddingBytes::Size(0)
-    }
 }
 
 impl PaddingBytes {
@@ -64,9 +58,9 @@ impl<'a> ReadFrame<'a> for QuicPaddingFrame {
                 ))
             }
             Some((&frame_type, _)) => bail!(QuicError::IllegalFrameType(frame_type)),
-            _ => bail!(QuicError::IncompletePacket(
-                Needed::Size(kQuicFrameTypeSize)
-            )),
+            _ => bail!(QuicError::IncompletePacket(Needed::Size(
+                kQuicFrameTypeSize
+            ))),
         }
     }
 }

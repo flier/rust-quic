@@ -37,7 +37,7 @@ pub trait ReadFrame<'a> {
 pub trait WriteFrame<'a> {
     type Error;
 
-    fn frame_size<W>(&self, writer: &W) -> usize
+    fn frame_size<W>(&self, context: &W) -> usize
     where
         W: QuicFrameWriter<'a>;
 
@@ -48,7 +48,17 @@ pub trait WriteFrame<'a> {
         B: BufMut;
 }
 
-pub trait QuicFrameReader<'a>
+pub trait QuicFrameContext {
+    fn packet_header(&self) -> &QuicPacketHeader;
+
+    fn quic_version(&self) -> QuicVersion;
+
+    fn creation_time(&self) -> QuicTime;
+
+    fn last_timestamp(&self) -> QuicTimeDelta;
+}
+
+pub trait QuicFrameReader<'a>: QuicFrameContext
 where
     Self: Sized,
 {
@@ -69,14 +79,6 @@ where
             payload,
         }
     }
-
-    fn packet_header(&self) -> &QuicPacketHeader;
-
-    fn quic_version(&self) -> QuicVersion;
-
-    fn creation_time(&self) -> QuicTime;
-
-    fn last_timestamp(&self) -> QuicTimeDelta;
 }
 
 pub struct Frames<'a, R>
@@ -113,7 +115,7 @@ where
     }
 }
 
-pub trait QuicFrameWriter<'a>
+pub trait QuicFrameWriter<'a>: QuicFrameContext
 where
     Self: Sized,
 {
@@ -143,12 +145,6 @@ where
 
         Ok(wrote)
     }
-
-    fn packet_header(&self) -> &QuicPacketHeader;
-
-    fn quic_version(&self) -> QuicVersion;
-
-    fn creation_time(&self) -> QuicTime;
 }
 
 #[cfg(test)]
@@ -184,16 +180,16 @@ pub mod mocks {
     }
 
     #[derive(Clone, Debug)]
-    pub struct MockFrameReader<'a> {
+    pub struct MockFrameContext<'a> {
         quic_version: QuicVersion,
         packet_header: QuicPacketHeader<'a>,
         creation_time: QuicTime,
         last_timestamp: QuicTimeDelta,
     }
 
-    impl<'a> MockFrameReader<'a> {
+    impl<'a> MockFrameContext<'a> {
         pub fn new(quic_version: QuicVersion) -> Self {
-            MockFrameReader {
+            MockFrameContext {
                 quic_version,
                 packet_header: QuicPacketHeader::default(),
                 creation_time: time::now().to_timespec(),
@@ -202,7 +198,7 @@ pub mod mocks {
         }
     }
 
-    impl<'a> QuicFrameReader<'a> for MockFrameReader<'a> {
+    impl<'a> QuicFrameContext for MockFrameContext<'a> {
         fn packet_header(&self) -> &QuicPacketHeader {
             &self.packet_header
         }
@@ -220,36 +216,9 @@ pub mod mocks {
         }
     }
 
-    #[derive(Clone, Debug)]
-    pub struct MockFrameWriter<'a> {
-        quic_version: QuicVersion,
-        packet_header: QuicPacketHeader<'a>,
-        creation_time: QuicTime,
-        last_timestamp: QuicTimeDelta,
-    }
+    pub type MockFrameReader<'a> = MockFrameContext<'a>;
+    pub type MockFrameWriter<'a> = MockFrameContext<'a>;
 
-    impl<'a> MockFrameWriter<'a> {
-        pub fn new(quic_version: QuicVersion) -> Self {
-            MockFrameWriter {
-                quic_version,
-                packet_header: QuicPacketHeader::default(),
-                creation_time: time::now().to_timespec(),
-                last_timestamp: QuicTimeDelta::zero(),
-            }
-        }
-    }
-
-    impl<'a> QuicFrameWriter<'a> for MockFrameWriter<'a> {
-        fn packet_header(&self) -> &QuicPacketHeader {
-            &self.packet_header
-        }
-
-        fn quic_version(&self) -> QuicVersion {
-            self.quic_version
-        }
-
-        fn creation_time(&self) -> QuicTime {
-            self.creation_time
-        }
-    }
+    impl<'a> QuicFrameReader<'a> for MockFrameReader<'a> {}
+    impl<'a> QuicFrameWriter<'a> for MockFrameWriter<'a> {}
 }

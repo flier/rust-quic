@@ -1,13 +1,11 @@
-use std::mem;
-
 use byteorder::ByteOrder;
 use bytes::BufMut;
 use failure::Error;
 use nom::IResult;
 use num::FromPrimitive;
 
-use constants::kQuicFrameTypeSize;
 use errors::{QuicError, QuicRstStreamErrorCode};
+use framer::{kQuicErrorCodeSize, kQuicFrameTypeSize, kQuicMaxStreamIdSize, kQuicMaxStreamOffsetSize};
 use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
 use proto::{QuicStreamId, QuicStreamOffset};
 use types::{QuicFrameType, QuicVersion};
@@ -54,11 +52,11 @@ impl<'a> WriteFrame<'a> for QuicRstStreamFrame {
         // Frame type
         kQuicFrameTypeSize +
         // Stream ID
-        mem::size_of::<QuicStreamId>() +
+        kQuicMaxStreamIdSize +
         // Error code
-        mem::size_of::<QuicRstStreamErrorCode>()+
+        kQuicErrorCodeSize +
         // Byte offset
-        mem::size_of::<QuicStreamOffset>()
+        kQuicMaxStreamOffsetSize
     }
 
     fn write_frame<E, W, B>(&self, writer: &W, buf: &mut B) -> Result<usize, Self::Error>

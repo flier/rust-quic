@@ -19,6 +19,9 @@ use errors::QuicError::*;
 use proto::QuicPacketNumber;
 use types::{QuicDiversificationNonce, QuicVersion};
 
+const kAuthTagSize: usize = 12;
+const kNoncePrefixSize: usize = 4;
+
 /// An `Aes128Gcm12Encrypter` is a `QuicEncrypter`
 /// that implements the `AEAD_AES_128_GCM_12` algorithm specified in RFC 5282.
 ///
@@ -151,6 +154,22 @@ where
         }
 
         self.encrypt(&nonce, associated_data, plain_text)
+    }
+
+    fn key_size(&self) -> usize {
+        A::algorithm().key_len()
+    }
+
+    fn nonce_prefix_size(&self) -> usize {
+        kNoncePrefixSize
+    }
+
+    fn max_plaintext_size(&self, ciphertext_size: usize) -> usize {
+        ciphertext_size - kAuthTagSize
+    }
+
+    fn ciphertext_size(&self, plaintext_size: usize) -> usize {
+        plaintext_size + kAuthTagSize
     }
 }
 

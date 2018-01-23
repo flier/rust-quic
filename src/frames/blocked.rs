@@ -1,12 +1,10 @@
-use std::mem;
-
 use byteorder::ByteOrder;
 use bytes::BufMut;
 use failure::Error;
 use nom::IResult;
 
-use constants::kQuicFrameTypeSize;
 use errors::QuicError;
+use framer::{kQuicFrameTypeSize, kQuicMaxStreamIdSize};
 use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
 use proto::QuicStreamId;
 use types::{QuicFrameType, QuicVersion};
@@ -19,7 +17,7 @@ use types::{QuicFrameType, QuicVersion};
 pub struct QuicBlockedFrame {
     // The stream this frame applies to.  0 is a special case meaning the overall
     // connection rather than a specific stream.
-    stream_id: QuicStreamId,
+    pub stream_id: QuicStreamId,
 }
 
 impl<'a> ReadFrame<'a> for QuicBlockedFrame {
@@ -49,7 +47,7 @@ impl<'a> WriteFrame<'a> for QuicBlockedFrame {
         // Frame Type
         kQuicFrameTypeSize +
         // Stream ID
-        mem::size_of::<QuicStreamId>()
+        kQuicMaxStreamIdSize
     }
 
     fn write_frame<E, W, B>(&self, writer: &W, buf: &mut B) -> Result<usize, Self::Error>

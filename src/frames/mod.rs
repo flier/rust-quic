@@ -25,7 +25,7 @@ pub use self::ping::QuicPingFrame;
 pub use self::reset::QuicRstStreamFrame;
 pub use self::stop_waiting::QuicStopWaitingFrame;
 pub use self::stream::QuicStreamFrame;
-pub use self::traits::{BufMutExt, QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
+pub use self::traits::{BufMutExt, QuicFrameContext, QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
 pub use self::win_update::QuicWindowUpdateFrame;
 
 #[cfg(test)]

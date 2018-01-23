@@ -1,12 +1,10 @@
-use std::mem;
-
 use byteorder::ByteOrder;
 use bytes::BufMut;
 use failure::Error;
 use nom::IResult;
 
-use constants::{kQuicFrameTypeSize, kStringPieceLenSize};
 use errors::{QuicError, QuicErrorCode};
+use framer::{kQuicErrorCodeSize, kQuicErrorDetailsLengthSize, kQuicFrameTypeSize};
 use frames::{BufMutExt, QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
 use types::{QuicFrameType, QuicVersion};
 
@@ -49,9 +47,9 @@ impl<'a> WriteFrame<'a> for QuicConnectionCloseFrame<'a> {
         // Frame Type
         kQuicFrameTypeSize +
         // Error Code
-        mem::size_of::<QuicErrorCode>() +
+        kQuicErrorCodeSize +
         // Reason Phrase
-        kStringPieceLenSize + self.error_details.map(|s| s.len()).unwrap_or_default()
+        kQuicErrorDetailsLengthSize + self.error_details.map(|s| s.len()).unwrap_or_default()
     }
 
     fn write_frame<E, W, B>(&self, writer: &W, buf: &mut B) -> Result<usize, Self::Error>

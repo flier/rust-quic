@@ -7,8 +7,9 @@ use bytes::BufMut;
 use failure::{Error, Fail};
 use nom::{self, IResult, Needed};
 
-use constants::{kQuicFrameTypeSize, kQuicFrameTypeStreamMask, kQuicFrameTypeStreamMask_Pre40};
+use constants::{kQuicFrameTypeStreamMask, kQuicFrameTypeStreamMask_Pre40};
 use errors::QuicError::{self, IncompletePacket};
+use framer::kQuicFrameTypeSize;
 use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
 use proto::{QuicStreamId, QuicStreamOffset};
 use types::QuicVersion;
@@ -388,9 +389,11 @@ mod tests {
                 buf.len()
             );
             assert_eq!(
-                &buf, &payload,
+                &buf,
+                &payload,
                 "write stream frame {:?}, version {:?}",
-                stream_frame, quic_version
+                stream_frame,
+                quic_version
             );
         }
     }

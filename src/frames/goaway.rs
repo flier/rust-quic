@@ -1,12 +1,10 @@
-use std::mem;
-
 use byteorder::ByteOrder;
 use bytes::BufMut;
 use failure::Error;
 use nom::IResult;
 
-use constants::{kQuicFrameTypeSize, kStringPieceLenSize};
 use errors::{QuicError, QuicErrorCode};
+use framer::{kQuicFrameTypeSize, kQuicMaxStreamIdSize, kQuicErrorCodeSize, kQuicErrorDetailsLengthSize};
 use frames::{BufMutExt, QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
 use proto::QuicStreamId;
 use types::{QuicFrameType, QuicVersion};
@@ -17,11 +15,11 @@ use types::{QuicFrameType, QuicVersion};
 #[derive(Clone, Debug, PartialEq)]
 pub struct QuicGoAwayFrame<'a> {
     /// A 32-bit field containing the `QuicErrorCode` which indicates the reason for closing this connection.
-    error_code: QuicErrorCode,
+    pub error_code: QuicErrorCode,
     /// The last Stream ID which was accepted by the sender of the GOAWAY message.
-    last_good_stream_id: Option<QuicStreamId>,
+    pub last_good_stream_id: Option<QuicStreamId>,
     /// An optional human-readable explanation for why the connection was closed.
-    reason_phrase: Option<&'a str>,
+    pub reason_phrase: Option<&'a str>,
 }
 
 impl<'a> ReadFrame<'a> for QuicGoAwayFrame<'a> {
@@ -51,11 +49,11 @@ impl<'a> WriteFrame<'a> for QuicGoAwayFrame<'a> {
         // Frame Type
         kQuicFrameTypeSize +
         // Error Code
-        mem::size_of::<QuicErrorCode>() +
+        kQuicErrorCodeSize +
         // Last Good Stream ID
-        mem::size_of::<QuicStreamId>() +
+        kQuicMaxStreamIdSize +
         // Reason Phrase
-        kStringPieceLenSize + self.reason_phrase.map(|s| s.len()).unwrap_or_default()
+        kQuicErrorDetailsLengthSize + self.reason_phrase.map(|s| s.len()).unwrap_or_default()
     }
 
     fn write_frame<E, W, B>(&self, writer: &W, buf: &mut B) -> Result<usize, Self::Error>
