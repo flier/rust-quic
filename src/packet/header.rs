@@ -1,20 +1,18 @@
 #![allow(dead_code, non_upper_case_globals)]
 
 use std::mem;
-use std::net::SocketAddr;
 use std::ops::Deref;
 use std::str::FromStr;
 
 use byteorder::{ByteOrder, NetworkEndian};
-use bytes::{BufMut, Bytes};
+use bytes::BufMut;
 use failure::Error;
 use nom::{IResult, Needed, be_u64, be_u8};
 
 use constants::{kPublicFlagsSize, kQuicVersionSize};
 use errors::QuicError::{self, IncompletePacket};
-use proto::{QuicConnectionId, QuicPacketNumber, QuicPacketNumberLength, QuicPacketNumberLengthFlags,
-            QuicPublicResetNonceProof};
-use types::{QuicDiversificationNonce, QuicTag, QuicTime, QuicVersion};
+use proto::{QuicConnectionId, QuicPacketNumber, QuicPacketNumberLength, QuicPacketNumberLengthFlags};
+use types::{QuicDiversificationNonce, QuicTag, QuicVersion};
 
 const kPublicHeaderConnectionIdSize: usize = 8;
 
@@ -202,118 +200,6 @@ impl<'a> Deref for QuicPacketHeader<'a> {
         &self.public_header
     }
 }
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct QuicPublicResetPacket<'a> {
-    pub public_header: QuicPacketPublicHeader<'a>,
-    pub nonce_proof: QuicPublicResetNonceProof,
-    pub client_address: Option<SocketAddr>,
-}
-
-#[derive(Clone, Debug)]
-pub struct QuicData {}
-
-#[derive(Clone, Debug)]
-pub struct QuicEncryptedPacket(Bytes);
-
-impl QuicEncryptedPacket {
-    pub fn as_bytes(&self) -> &[u8] {
-        self.0.as_ref()
-    }
-}
-
-impl Deref for QuicEncryptedPacket {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
-        self.as_bytes()
-    }
-}
-
-// A received encrypted QUIC packet, with a recorded time of receipt.
-#[derive(Clone, Debug)]
-pub struct QuicReceivedPacket {
-    pub packet: QuicEncryptedPacket,
-    /// the time at which the packet was received.
-    pub receipt_time: QuicTime,
-    /// the TTL of the packet
-    pub ttl: isize,
-}
-
-impl Deref for QuicReceivedPacket {
-    type Target = QuicEncryptedPacket;
-
-    fn deref(&self) -> &Self::Target {
-        &self.packet
-    }
-}
-
-impl From<QuicReceivedPacket> for QuicEncryptedPacket {
-    fn from(packet: QuicReceivedPacket) -> Self {
-        packet.packet
-    }
-}
-
-pub type QuicVersionNegotiationPacket<'a> = QuicPacketPublicHeader<'a>;
-
-/// Recognizes big endian unsigned 8 bytes integer
-#[inline]
-pub fn be_u48(i: &[u8]) -> IResult<&[u8], u64> {
-    if i.len() < 6 {
-        IResult::Incomplete(Needed::Size(6))
-    } else {
-        let res = (u64::from(i[0]) << 40) + (u64::from(i[1]) << 32) + (u64::from(i[2]) << 24) + (u64::from(i[3]) << 16)
-            + (u64::from(i[4]) << 8) + u64::from(i[5]);
-        IResult::Done(&i[6..], res)
-    }
-}
-
-/// Recognizes little endian unsigned 8 bytes integer
-#[inline]
-pub fn le_u48(i: &[u8]) -> IResult<&[u8], u64> {
-    if i.len() < 6 {
-        IResult::Incomplete(Needed::Size(6))
-    } else {
-        let res = (u64::from(i[5]) << 40) + (u64::from(i[4]) << 32) + (u64::from(i[3]) << 24) + (u64::from(i[2]) << 16)
-            + (u64::from(i[1]) << 8) + u64::from(i[0]);
-        IResult::Done(&i[6..], res)
-    }
-}
-
-#[macro_export]
-macro_rules! u48 (
-    ($input:expr, $endianness:expr) => (
-        if ::nom::Endianness::Big == $endianness {
-            $crate::packet::be_u48($input)
-        } else {
-            $crate::packet::le_u48($input)
-        }
-    );
-);
-
-#[macro_export]
-macro_rules! uint (
-    ($input:expr, $endianness:expr, $nbytes:expr) => (
-        if $nbytes < 1 || $nbytes > 8 {
-            ::nom::IResult::Error(::nom::Err::Code(::nom::ErrorKind::Tag))
-        } else if $input.len() < $nbytes {
-            ::nom::IResult::Incomplete(::nom::Needed::Size($nbytes))
-        } else {
-            use byteorder::ByteOrder;
-
-            let (remaining, value) = match $endianness {
-                ::nom::Endianness::Little => (
-                    &$input[$nbytes..], ::byteorder::LittleEndian::read_uint($input, $nbytes)
-                ),
-                ::nom::Endianness::Big => (
-                    &$input[$nbytes..], ::byteorder::BigEndian::read_uint($input, $nbytes)
-                ),
-            };
-
-            ::nom::IResult::Done(remaining, value)
-        }
-    );
-);
 
 named_args!(parse_public_header(is_server: bool)<QuicPacketPublicHeader>,
     do_parse!(

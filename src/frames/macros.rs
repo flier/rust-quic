@@ -77,3 +77,27 @@ macro_rules! string_piece16 {
         $crate::frames::macros::string_piece16($input, $endianness)
     )
 }
+
+#[macro_export]
+macro_rules! uint (
+    ($input:expr, $endianness:expr, $nbytes:expr) => (
+        if $nbytes < 1 || $nbytes > 8 {
+            ::nom::IResult::Error(::nom::Err::Code(::nom::ErrorKind::Tag))
+        } else if $input.len() < $nbytes {
+            ::nom::IResult::Incomplete(::nom::Needed::Size($nbytes))
+        } else {
+            use byteorder::ByteOrder;
+
+            let (remaining, value) = match $endianness {
+                ::nom::Endianness::Little => (
+                    &$input[$nbytes..], ::byteorder::LittleEndian::read_uint($input, $nbytes)
+                ),
+                ::nom::Endianness::Big => (
+                    &$input[$nbytes..], ::byteorder::BigEndian::read_uint($input, $nbytes)
+                ),
+            };
+
+            ::nom::IResult::Done(remaining, value)
+        }
+    );
+);
