@@ -241,13 +241,11 @@ impl QuicAckFrame {
 
         frame_size += kQuicDeltaTimeLargestObservedSize;
 
-        if quic_version <= QuicVersion::QUIC_VERSION_39 {
-            if num_ack_blocks > 0 {
-                // Number of ack blocks.
-                buf.put_u8(num_ack_blocks);
+        if quic_version <= QuicVersion::QUIC_VERSION_39 && num_ack_blocks > 0 {
+            // Number of ack blocks.
+            buf.put_u8(num_ack_blocks);
 
-                frame_size += kNumberOfAckBlocksSize;
-            }
+            frame_size += kNumberOfAckBlocksSize;
         }
 
         // First ack block length.

@@ -25,10 +25,10 @@ pub trait QuicConnectionVisitor {
     fn on_successful_version_negotiation(&self, _version: QuicVersion) {}
 }
 
-/// `QuicConnectionDebugVisitor` receives callbacks from the QuicConnection at interesting points.
+/// `QuicConnectionDebugVisitor` receives callbacks from the `QuicConnection` at interesting points.
 pub trait QuicConnectionDebugVisitor {
     /// Called when a packet has been received, but before it is validated or parsed.
-    fn on_packet_received(&self, _self_addr: &SocketAddr, _peer_addr: &SocketAddr, _packet: &QuicReceivedPacket) {}
+    fn on_packet_received(&self, _self_addr: SocketAddr, _peer_addr: SocketAddr, _packet: &QuicReceivedPacket) {}
 
     /// Called when an undecryptable packet has been received.
     fn on_undecryptable_packet(&self, _packet: &QuicReceivedPacket) {}
@@ -72,10 +72,9 @@ where
     where
         P: 'static + Perspective,
     {
-        let framer = Rc::new(RefCell::new(QuicFramer::new::<P>(
-            supported_versions,
-            time::get_time(),
-        )));
+        let framer = Rc::new(RefCell::new(
+            QuicFramer::new::<P>(supported_versions, time::get_time()),
+        ));
         let inner = Rc::new(Inner {
             connection_id,
             is_server: P::is_server(),
@@ -93,8 +92,8 @@ where
 
     pub fn process_packet<P>(
         &self,
-        self_addr: &SocketAddr,
-        peer_addr: &SocketAddr,
+        self_addr: SocketAddr,
+        peer_addr: SocketAddr,
         packet: QuicReceivedPacket,
     ) -> Result<(), Error>
     where
@@ -103,6 +102,8 @@ where
         self.inner.process_packet::<P>(self_addr, peer_addr, packet)
     }
 }
+
+type InnerQuicFramer<'a, V, D> = QuicFramer<'a, Rc<Inner<'a, V, D>>, Inner<'a, V, D>>;
 
 struct Inner<'a, V, D>
 where
@@ -113,7 +114,7 @@ where
     is_server: bool,
     visitor: Option<&'a V>,
     debug_visitor: Option<&'a D>,
-    framer: Rc<RefCell<QuicFramer<'a, Rc<Inner<'a, V, D>>, Inner<'a, V, D>>>>,
+    framer: Rc<RefCell<InnerQuicFramer<'a, V, D>>>,
     stats: QuicConnectionStats,
     state: RefCell<State>,
 }
@@ -248,7 +249,7 @@ where
         if let Some(version) = packet
             .versions
             .as_ref()
-            .and_then(|versions| self.select_mutual_version(&versions))
+            .and_then(|versions| self.select_mutual_version(versions))
         {
             self.framer.borrow_mut().quic_version = version;
         } else {
@@ -287,8 +288,8 @@ where
 
     pub fn process_packet<P>(
         &self,
-        self_addr: &SocketAddr,
-        peer_addr: &SocketAddr,
+        self_addr: SocketAddr,
+        peer_addr: SocketAddr,
         packet: QuicReceivedPacket,
     ) -> Result<(), Error>
     where
@@ -469,15 +470,15 @@ impl State {
         self.undecryptable_packets.push(packet)
     }
 
-    pub fn update_address(&mut self, self_addr: &SocketAddr, peer_addr: &SocketAddr) {
-        self.last_packet_source_address = Some(self_addr.clone());
-        self.last_packet_destination_address = Some(peer_addr.clone());
+    pub fn update_address(&mut self, self_addr: SocketAddr, peer_addr: SocketAddr) {
+        self.last_packet_source_address = Some(self_addr);
+        self.last_packet_destination_address = Some(peer_addr);
 
         if self.self_addr.is_none() {
-            self.self_addr = Some(self_addr.clone());
+            self.self_addr = Some(self_addr);
         }
         if self.peer_addr.is_none() {
-            self.peer_addr = Some(peer_addr.clone());
+            self.peer_addr = Some(peer_addr);
         }
     }
 }
@@ -486,7 +487,7 @@ pub type QuicByteCount = Counter;
 pub type QuicPacketCount = Counter;
 pub type QuicPacketNumber = Counter;
 
-/// Structure to hold stats for a QuicConnection.
+/// Structure to hold stats for a `QuicConnection`.
 pub struct QuicConnectionStats {
     /// Includes retransmissions.
     pub bytes_sent: QuicByteCount,

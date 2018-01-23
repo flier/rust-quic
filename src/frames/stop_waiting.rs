@@ -28,7 +28,7 @@ impl<'a> ReadFrame<'a> for QuicStopWaitingFrame {
         E: ByteOrder,
         R: QuicFrameReader<'a>,
     {
-        match parse_quic_blocked_frame(
+        match parse_quic_stop_waiting_frame(
             payload,
             reader.quic_version(),
             reader.packet_header().public_header.packet_number_length,
@@ -80,9 +80,9 @@ impl<'a> WriteFrame<'a> for QuicStopWaitingFrame {
 }
 
 named_args!(
-    parse_quic_blocked_frame(quic_version: QuicVersion,
-                             packet_number_length: QuicPacketNumberLength,
-                             packet_number: QuicPacketNumber)<QuicStopWaitingFrame>,
+    parse_quic_stop_waiting_frame(quic_version: QuicVersion,
+                                  packet_number_length: QuicPacketNumberLength,
+                                  packet_number: QuicPacketNumber)<QuicStopWaitingFrame>,
     do_parse!(
         _frame_type: frame_type!(QuicFrameType::StopWaiting) >>
         least_unacked: verify!(

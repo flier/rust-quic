@@ -58,7 +58,7 @@ pub enum PeerAddressChangeType {
     IPV6_TO_IPV6_CHANGE,
 }
 
-/// Describes whether a ConnectionClose was originated by the peer.
+/// Describes whether a `ConnectionClose` was originated by the peer.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ConnectionCloseSource {
     FROM_PEER,

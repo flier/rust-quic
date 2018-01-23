@@ -88,7 +88,7 @@ impl QuicPacketNumberLength {
 }
 
 #[repr(u8)]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum QuicPacketNumberLengthFlags {
     PACKET_FLAGS_1BYTE_PACKET = 0,          // 00
     PACKET_FLAGS_2BYTE_PACKET = 1,          // 01
@@ -102,7 +102,7 @@ impl From<u8> for QuicPacketNumberLengthFlags {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, FromPrimitive)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, FromPrimitive)]
 pub enum QuicConnectionIdLength {
     PACKET_0BYTE_CONNECTION_ID = 0,
     PACKET_1BYTE_CONNECTION_ID = 1,
@@ -111,11 +111,11 @@ pub enum QuicConnectionIdLength {
 }
 
 impl QuicConnectionIdLength {
-    pub fn size_of(connection_id: Option<QuicConnectionId>) -> Self {
+    pub fn of(connection_id: Option<QuicConnectionId>) -> Self {
         match connection_id {
             None => QuicConnectionIdLength::PACKET_0BYTE_CONNECTION_ID,
-            Some(id) if id < u8::MAX as u64 => QuicConnectionIdLength::PACKET_1BYTE_CONNECTION_ID,
-            Some(id) if id < u32::MAX as u64 => QuicConnectionIdLength::PACKET_4BYTE_CONNECTION_ID,
+            Some(id) if id < u64::from(u8::MAX) => QuicConnectionIdLength::PACKET_1BYTE_CONNECTION_ID,
+            Some(id) if id < u64::from(u32::MAX) => QuicConnectionIdLength::PACKET_4BYTE_CONNECTION_ID,
             _ => QuicConnectionIdLength::PACKET_8BYTE_CONNECTION_ID,
         }
     }
