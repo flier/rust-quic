@@ -8,6 +8,27 @@ use errors::QuicError;
 use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
 use types::{QuicFrameType, QuicVersion};
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PaddingBytes {
+    Size(usize),
+    Fill,
+}
+
+impl Default for PaddingBytes {
+    fn default() -> Self {
+        PaddingBytes::Size(0)
+    }
+}
+
+impl PaddingBytes {
+    pub fn len(&self) -> usize {
+        match *self {
+            PaddingBytes::Size(size) => size,
+            PaddingBytes::Fill => 0,
+        }
+    }
+}
+
 /// The `PADDING` frame pads a packet with 0x00 bytes.
 ///
 /// When this frame is encountered, the rest of the packet is expected to be padding bytes.
@@ -15,9 +36,7 @@ use types::{QuicFrameType, QuicVersion};
 /// A `PADDING` frame only has a Frame Type field, and must have the 8-bit Frame Type field set to 0x00.
 #[derive(Clone, Debug, PartialEq)]
 pub struct QuicPaddingFrame {
-    /// -1: full padding to the end of a max-sized packet
-    /// otherwise: only pad up to num_padding_bytes bytes
-    pub num_padding_bytes: isize,
+    pub padding_bytes: PaddingBytes,
 }
 
 impl<'a> ReadFrame<'a> for QuicPaddingFrame {
@@ -39,15 +58,15 @@ impl<'a> ReadFrame<'a> for QuicPaddingFrame {
 
                 Ok((
                     QuicPaddingFrame {
-                        num_padding_bytes: num_padding_bytes as isize,
+                        padding_bytes: PaddingBytes::Size(num_padding_bytes),
                     },
                     &remaining[num_padding_bytes..],
                 ))
             }
             Some((&frame_type, _)) => bail!(QuicError::IllegalFrameType(frame_type)),
-            _ => bail!(QuicError::IncompletePacket(Needed::Size(
-                kQuicFrameTypeSize
-            ))),
+            _ => bail!(QuicError::IncompletePacket(
+                Needed::Size(kQuicFrameTypeSize)
+            )),
         }
     }
 }
@@ -62,7 +81,7 @@ impl<'a> WriteFrame<'a> for QuicPaddingFrame {
         // Frame Type
         kQuicFrameTypeSize +
         // Padding Bytes
-        self.num_padding_bytes as usize
+        self.padding_bytes.len()
     }
 
     fn write_frame<E, W, B>(&self, writer: &W, buf: &mut B) -> Result<usize, Self::Error>
@@ -80,7 +99,7 @@ impl<'a> WriteFrame<'a> for QuicPaddingFrame {
         // Frame Type
         buf.put_u8(QuicFrameType::Padding as u8);
         // Padding Bytes
-        buf.put(vec![0u8; self.num_padding_bytes as usize]);
+        buf.put(vec![0u8; self.padding_bytes.len()]);
 
         Ok(frame_size)
     }
@@ -95,7 +114,7 @@ mod tests {
     #[test]
     fn padding_frame() {
         #[cfg_attr(rustfmt, rustfmt_skip)]
-        const test_cases: &[(QuicVersion, isize, &[u8])] = &[
+        const test_cases: &[(QuicVersion, usize, &[u8])] = &[
             (
                 QuicVersion::QUIC_VERSION_35,
                 29,
@@ -146,7 +165,9 @@ mod tests {
 
         for &(quic_version, num_padding_bytes, payload) in test_cases {
             let (reader, writer) = mocks::pair(quic_version);
-            let padding_frame = QuicPaddingFrame { num_padding_bytes };
+            let padding_frame = QuicPaddingFrame {
+                padding_bytes: PaddingBytes::Size(num_padding_bytes),
+            };
 
             assert_eq!(
                 padding_frame.frame_size(&writer),

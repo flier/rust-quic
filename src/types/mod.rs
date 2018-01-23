@@ -29,9 +29,15 @@ pub type QuicTimeDelta = Duration;
 /// that it is retransmitted at a level which the peer can understand.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, FromPrimitive)]
 pub enum EncryptionLevel {
-    None,
-    Initial,
-    ForwardSecure,
+    None = 0,
+    Initial = 1,
+    ForwardSecure = 2,
+}
+
+impl Default for EncryptionLevel {
+    fn default() -> Self {
+        EncryptionLevel::None
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

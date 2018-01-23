@@ -39,6 +39,8 @@ pub enum QuicError {
 
     #[fail(display = "offset {} out of order", _0)] OffsetOutOfOrder(usize),
 
+    #[fail(display = "encrypt packet failed for packet_number {}", _0)] EncryptionFailure(QuicPacketNumber),
+
     #[fail(display = "decrypt packet failed for packet_number {}", _0)] DecryptionFailure(QuicPacketNumber),
 
     #[fail(display = "underflow with first ack block length")] FirstAckBlockLengthOverflow,

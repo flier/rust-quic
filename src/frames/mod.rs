@@ -20,7 +20,7 @@ pub use self::blocked::QuicBlockedFrame;
 pub use self::conn_close::QuicConnectionCloseFrame;
 pub use self::frame::QuicFrame;
 pub use self::goaway::QuicGoAwayFrame;
-pub use self::padding::QuicPaddingFrame;
+pub use self::padding::{PaddingBytes, QuicPaddingFrame};
 pub use self::ping::QuicPingFrame;
 pub use self::reset::QuicRstStreamFrame;
 pub use self::stop_waiting::QuicStopWaitingFrame;

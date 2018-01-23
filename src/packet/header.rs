@@ -177,6 +177,10 @@ impl<'a> QuicPacketHeader<'a> {
         ))
     }
 
+    pub fn size(&self) -> usize {
+        self.public_header.size() + self.packet_number_length as usize
+    }
+
     pub fn write_to<E, B>(&self, buf: &mut B) -> Result<usize, Error>
     where
         E: ByteOrder,

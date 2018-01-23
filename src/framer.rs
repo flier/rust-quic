@@ -12,7 +12,7 @@ use failure::{Error, ResultExt};
 use nom::{IResult, le_u16};
 
 use constants::kMaxPacketSize;
-use crypto::{CryptoHandshakeMessage, NullDecrypter, QuicDecrypter, kCADR, kPRST, kRNON};
+use crypto::{CryptoHandshakeMessage, NullDecrypter, NullEncrypter, QuicDecrypter, QuicEncrypter, kCADR, kPRST, kRNON};
 use errors::QuicError;
 use errors::QuicError::*;
 use frames::{QuicAckFrame, QuicBlockedFrame, QuicConnectionCloseFrame, QuicFrame, QuicFrameReader, QuicFrameWriter,
@@ -133,6 +133,8 @@ where
     /// The time this framer was created.
     /// Time written to the wire will be written as a delta from this value.
     pub creation_time: QuicTime,
+    /// Encrypters used to encrypt packets via encrypt_payload().
+    pub encrypter: [Option<Box<QuicEncrypter>>; 3],
     visitor: Option<T>,
     state: RefCell<State>,
 }
@@ -150,8 +152,36 @@ where
             supported_versions,
             quic_version: supported_versions[0],
             creation_time,
+            encrypter: [Some(Box::new(NullEncrypter::<P>::default())), None, None],
             visitor: None,
             state: RefCell::new(State::new::<P>()),
+        }
+    }
+
+    /// Changes the encrypter used for level `level` to `encrypter`.
+    pub fn set_encrypter(&mut self, level: EncryptionLevel, encrypter: Box<QuicEncrypter>) {
+        self.encrypter[level as usize] = Some(encrypter);
+    }
+
+    /// Encrypts a payload in `buf`.
+    /// `ad_len` is the length of the associated data.
+    /// `total_len` is the length of the associated data plus plaintext.
+    pub fn encrypt_in_place(
+        &self,
+        level: EncryptionLevel,
+        packet_number: QuicPacketNumber,
+        associated_data: &[u8],
+        plain_text: &[u8],
+    ) -> Result<Bytes, Error> {
+        if let Some(encrypter) = self.encrypter[level as usize].as_ref() {
+            encrypter.encrypt_packet(
+                self.quic_version,
+                packet_number,
+                associated_data,
+                plain_text,
+            )
+        } else {
+            bail!(QuicError::EncryptionFailure(packet_number))
         }
     }
 }
@@ -258,9 +288,10 @@ where
         );
 
         if message.tag() != kPRST {
-            bail!(InvalidResetPacket(
-                format!("incorrect message tag: {}", message.tag())
-            ));
+            bail!(InvalidResetPacket(format!(
+                "incorrect message tag: {}",
+                message.tag()
+            )));
         }
 
         let packet = QuicPublicResetPacket {
@@ -530,19 +561,29 @@ where
 
         Ok(())
     }
+}
 
-    pub fn build_data_packet<E, I, B>(
+impl<'a, T, V> QuicFramer<'a, T, V>
+where
+    T: 'a + Deref<Target = V>,
+    V: 'a,
+{
+    pub fn build_data_packet<I, B>(
         &'a self,
         header: &'a QuicPacketHeader<'a>,
         frames: I,
         buf: &mut B,
     ) -> Result<usize, Error>
     where
-        E: ByteOrder,
         I: IntoIterator<Item = QuicFrame<'a>>,
         B: BufMut,
     {
-        let header_size = header.write_to::<E, B>(buf)?;
+        let header_size = if self.quic_version > QuicVersion::QUIC_VERSION_38 {
+            header.write_to::<NetworkEndian, B>(buf)?
+        } else {
+            header.write_to::<NativeEndian, B>(buf)?
+        };
+
         let frames_size = FrameWriter::new(self, header).write_frames(frames, buf)?;
 
         Ok(header_size + frames_size)
