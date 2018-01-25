@@ -230,7 +230,7 @@ named_args!(parse_public_header(is_server: bool)<QuicPacketPublicHeader>,
                 versions: server_version.map(|version| vec![version]),
                 nonce: nonce.map(|nonce| array_ref!(nonce, 0, 32)),
                 packet_number_length:
-                    QuicPacketNumberLength::from(QuicPacketNumberLengthFlags::from(packet_number_length_flag)),
+                    QuicPacketNumberLength::read(QuicPacketNumberLengthFlags::from(packet_number_length_flag)),
             }
         )
     )

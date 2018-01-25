@@ -35,6 +35,23 @@ impl From<QuicPacketNumberLengthFlags> for QuicPacketNumberLength {
 }
 
 impl QuicPacketNumberLength {
+    pub fn read(flags: QuicPacketNumberLengthFlags) -> Self {
+        match flags {
+            QuicPacketNumberLengthFlags::PACKET_FLAGS_8BYTE_PACKET => {
+                QuicPacketNumberLength::PACKET_6BYTE_PACKET_NUMBER
+            }
+            QuicPacketNumberLengthFlags::PACKET_FLAGS_4BYTE_PACKET => {
+                QuicPacketNumberLength::PACKET_4BYTE_PACKET_NUMBER
+            }
+            QuicPacketNumberLengthFlags::PACKET_FLAGS_2BYTE_PACKET => {
+                QuicPacketNumberLength::PACKET_2BYTE_PACKET_NUMBER
+            }
+            QuicPacketNumberLengthFlags::PACKET_FLAGS_1BYTE_PACKET => {
+                QuicPacketNumberLength::PACKET_1BYTE_PACKET_NUMBER
+            }
+        }
+    }
+
     pub fn from_flags(version: QuicVersion, flags: QuicPacketNumberLengthFlags) -> Self {
         match flags {
             QuicPacketNumberLengthFlags::PACKET_FLAGS_8BYTE_PACKET => if version <= QuicVersion::QUIC_VERSION_39 {
