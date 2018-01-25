@@ -9,6 +9,15 @@ use nom::Endianness;
 use errors::QuicError::UnsupportedVersion;
 use types::{QuicTag, ToEndianness};
 
+const kSupportedQuicVersions: &[QuicVersion] = &[
+    QuicVersion::QUIC_VERSION_41,
+    QuicVersion::QUIC_VERSION_40,
+    QuicVersion::QUIC_VERSION_39,
+    QuicVersion::QUIC_VERSION_38,
+    QuicVersion::QUIC_VERSION_37,
+    QuicVersion::QUIC_VERSION_35,
+];
+
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub enum QuicVersion {
     /// Allows endpoints to independently set stream limit.
@@ -31,11 +40,16 @@ pub enum QuicVersion {
 
 impl Default for QuicVersion {
     fn default() -> Self {
-        QuicVersion::QUIC_VERSION_35
+        QuicVersion::QUIC_VERSION_41
     }
 }
 
 impl QuicVersion {
+    // Returns a slice of QUIC versions in kSupportedQuicVersions.
+    pub fn all_supported() -> &'static [QuicVersion] {
+        kSupportedQuicVersions
+    }
+
     pub fn endianness(self) -> Endianness {
         if self > QuicVersion::QUIC_VERSION_38 {
             NetworkEndian::endianness()
