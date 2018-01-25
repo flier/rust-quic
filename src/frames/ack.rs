@@ -9,12 +9,11 @@ use failure::{Error, Fail};
 use nom::{self, IResult, Needed, be_u8};
 use time::Duration;
 
-use constants::{kQuicFrameTypeAckMask, kQuicFrameTypeAckMask_Pre40};
 use errors::ParseError::*;
 use errors::QuicError::{self, IncompletePacket};
-use framer::{kMaxAckBlocks, kNumberOfAckBlocksSize, kQuicDeltaTimeLargestObservedSize, kQuicFrameTypeSize,
-             kQuicNumTimestampsSize};
-use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
+use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame, kMaxAckBlocks, kNumberOfAckBlocksSize,
+             kQuicDeltaTimeLargestObservedSize, kQuicFrameTypeAckMask, kQuicFrameTypeAckMask_Pre40,
+             kQuicFrameTypeSize, kQuicNumTimestampsSize};
 use proto::{QuicPacketNumber, QuicPacketNumberLength, QuicPacketNumberLengthFlags};
 use types::{QuicTime, QuicTimeDelta, QuicVersion, ToQuicTimeDelta, UFloat16, ufloat16};
 
@@ -89,6 +88,15 @@ impl<'a> WriteFrame<'a> for QuicAckFrame {
 }
 
 impl QuicAckFrame {
+    pub fn new(largest_observed: QuicPacketNumber) -> Self {
+        QuicAckFrame {
+            largest_observed,
+            ack_delay_time: QuicTimeDelta::zero(),
+            received_packet_times: None,
+            packets: PacketNumberQueue::default(),
+        }
+    }
+
     fn parse(
         quic_version: QuicVersion,
         creation_time: QuicTime,
@@ -174,7 +182,14 @@ impl QuicAckFrame {
         let ack_block_length = self.ack_block_length(quic_version);
         let ack_blocks = self.packets.ack_blocks(self.largest_observed);
         // Number of ack blocks.
-        let num_ack_blocks = cmp::min(ack_blocks.len() - 1, u8::MAX as usize) as u8;
+        let num_ack_blocks = cmp::min(
+            if ack_blocks.is_empty() {
+                0
+            } else {
+                ack_blocks.len() - 1
+            },
+            kMaxAckBlocks,
+        ) as u8;
 
         let mut flags = if quic_version < QuicVersion::QUIC_VERSION_40 {
             kQuicFrameTypeAckMask_Pre40
@@ -449,7 +464,7 @@ named_args!(parse_quic_ack_frame(quic_version: QuicVersion,
 /// Intended to be used in a sliding window fashion,
 /// where smaller old packet numbers are removed and larger new packet numbers are added,
 /// with the occasional random access.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct PacketNumberQueue {
     ranges: Vec<(u64, u64)>,
 }

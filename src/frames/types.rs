@@ -1,9 +1,9 @@
 use failure::Error;
 use num::FromPrimitive;
 
-use constants::{kQuicFrameTypeAckMask, kQuicFrameTypeAckMask_Pre40, kQuicFrameTypeRegularMask,
-                kQuicFrameTypeSpecialMask, kQuicFrameTypeStreamMask, kQuicFrameTypeStreamMask_Pre40};
 use errors::QuicError;
+use frames::{kQuicFrameTypeAckMask, kQuicFrameTypeAckMask_Pre40, kQuicFrameTypeRegularMask, kQuicFrameTypeSpecialMask,
+             kQuicFrameTypeStreamMask, kQuicFrameTypeStreamMask_Pre40};
 use types::QuicVersion;
 
 #[repr(u8)]

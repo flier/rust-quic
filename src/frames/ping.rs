@@ -4,9 +4,7 @@ use failure::Error;
 use nom::Needed;
 
 use errors::QuicError;
-use framer::kQuicFrameTypeSize;
-use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
-use types::QuicFrameType;
+use frames::{QuicFrameReader, QuicFrameType, QuicFrameWriter, ReadFrame, WriteFrame, kQuicFrameTypeSize};
 
 /// A ping frame contains no payload, though it is retransmittable,
 /// and ACK'd just like other normal frames.

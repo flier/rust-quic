@@ -5,10 +5,10 @@ use nom::IResult;
 use num::FromPrimitive;
 
 use errors::{QuicError, QuicRstStreamErrorCode};
-use framer::{kQuicErrorCodeSize, kQuicFrameTypeSize, kQuicMaxStreamIdSize, kQuicMaxStreamOffsetSize};
-use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
+use frames::{QuicFrameReader, QuicFrameType, QuicFrameWriter, ReadFrame, WriteFrame, kQuicErrorCodeSize,
+             kQuicFrameTypeSize, kQuicMaxStreamIdSize, kQuicMaxStreamOffsetSize};
 use proto::{QuicStreamId, QuicStreamOffset};
-use types::{QuicFrameType, QuicVersion};
+use types::QuicVersion;
 
 /// The `RST_STREAM` frame allows for abnormal termination of a stream.
 ///

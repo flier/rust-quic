@@ -23,34 +23,6 @@ use packet::{quic_version, QuicEncryptedPacket, QuicPacketHeader, QuicPacketPubl
 use proto::QuicPacketNumber;
 use types::{EncryptionLevel, Perspective, QuicTime, QuicTimeDelta, QuicVersion, ToEndianness, ToQuicPacketNumber};
 
-// Number of bytes reserved for the frame type preceding each frame.
-pub const kQuicFrameTypeSize: usize = 1;
-// Number of bytes reserved for error code.
-pub const kQuicErrorCodeSize: usize = 4;
-// Number of bytes reserved to denote the length of error details field.
-pub const kQuicErrorDetailsLengthSize: usize = 2;
-
-// Maximum number of bytes reserved for stream id.
-pub const kQuicMaxStreamIdSize: usize = 4;
-// Maximum number of bytes reserved for byte offset in stream frame.
-pub const kQuicMaxStreamOffsetSize: usize = 8;
-// Number of bytes reserved to store payload length in stream frame.
-pub const kQuicStreamPayloadLengthSize: usize = 2;
-
-// Size in bytes reserved for the delta time of the largest observed
-// packet number in ack frames.
-pub const kQuicDeltaTimeLargestObservedSize: usize = 2;
-// Size in bytes reserved for the number of received packets with timestamps.
-pub const kQuicNumTimestampsSize: usize = 1;
-// Size in bytes reserved for the number of missing packets in ack frames.
-pub const kNumberOfNackRangesSize: usize = 1;
-// Size in bytes reserved for the number of ack blocks in ack frames.
-pub const kNumberOfAckBlocksSize: usize = 1;
-// Maximum number of missing packet ranges that can fit within an ack frame.
-pub const kMaxNackRanges: usize = (1 << (kNumberOfNackRangesSize * 8)) - 1;
-// Maximum number of ack blocks that can fit within an ack frame.
-pub const kMaxAckBlocks: usize = (1 << (kNumberOfAckBlocksSize * 8)) - 1;
-
 pub trait QuicFramerVisitor {
     /// Called when a new packet has been received, before it has been validated or processed.
     fn on_packet(&self) {}
@@ -66,7 +38,7 @@ pub trait QuicFramerVisitor {
     /// The visitor should return true after it updates the version of the `framer` to `received_version`
     /// or false to stop processing this packet.
     fn on_protocol_version_mismatch(&self, _received_version: QuicVersion) -> bool {
-        true
+        false
     }
 
     /// Called only when `perspective` is IS_CLIENT and a version negotiation packet has been parsed.
@@ -739,14 +711,6 @@ impl State {
         self.alternative_decrypter_latch = latch_once_used;
     }
 
-    pub fn decrypter(&self) -> &QuicDecrypter {
-        self.decrypter.as_ref()
-    }
-
-    pub fn alternative_decrypter(&self) -> Option<&QuicDecrypter> {
-        self.alternative_decrypter.as_ref().map(|d| d.as_ref())
-    }
-
     pub fn set_last_packet_number(&mut self, header: &QuicPacketHeader) {
         self.last_packet_number = header.packet_number;
         self.largest_packet_number = cmp::max(self.largest_packet_number, header.packet_number);
@@ -848,3 +812,13 @@ named!(
         )
     )
 );
+
+#[cfg(test)]
+pub mod mocks {
+    use super::*;
+
+    #[derive(Default)]
+    pub struct MockFramerVisitor {}
+
+    impl QuicFramerVisitor for MockFramerVisitor {}
+}

@@ -5,11 +5,10 @@ use nom::Needed;
 
 use errors::{QuicErrorCode, QuicRstStreamErrorCode};
 use errors::QuicError::IncompletePacket;
-use frames::{PaddingBytes, QuicAckFrame, QuicBlockedFrame, QuicConnectionCloseFrame, QuicFrameReader, QuicFrameWriter,
-             QuicGoAwayFrame, QuicPaddingFrame, QuicPingFrame, QuicRstStreamFrame, QuicStopWaitingFrame,
-             QuicStreamFrame, QuicWindowUpdateFrame, ReadFrame, WriteFrame};
+use frames::{PaddingBytes, QuicAckFrame, QuicBlockedFrame, QuicConnectionCloseFrame, QuicFrameReader, QuicFrameType,
+             QuicFrameWriter, QuicGoAwayFrame, QuicPaddingFrame, QuicPingFrame, QuicRstStreamFrame,
+             QuicStopWaitingFrame, QuicStreamFrame, QuicWindowUpdateFrame, ReadFrame, WriteFrame};
 use proto::{QuicPacketNumber, QuicStreamId, QuicStreamOffset};
-use types::QuicFrameType;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum QuicFrame<'a> {
@@ -87,6 +86,10 @@ impl<'a> QuicFrame<'a> {
             fin,
             data,
         })
+    }
+
+    pub fn ack(largest_observed: QuicPacketNumber) -> Self {
+        QuicFrame::Ack(QuicAckFrame::new(largest_observed))
     }
 
     pub fn frame_type(&self) -> QuicFrameType {

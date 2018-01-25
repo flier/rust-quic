@@ -4,9 +4,8 @@ use failure::Error;
 use nom::Needed;
 
 use errors::QuicError;
-use framer::kQuicFrameTypeSize;
-use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
-use types::{QuicFrameType, QuicVersion};
+use frames::{QuicFrameReader, QuicFrameType, QuicFrameWriter, ReadFrame, WriteFrame, kQuicFrameTypeSize};
+use types::QuicVersion;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PaddingBytes {

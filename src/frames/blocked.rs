@@ -4,10 +4,10 @@ use failure::Error;
 use nom::IResult;
 
 use errors::QuicError;
-use framer::{kQuicFrameTypeSize, kQuicMaxStreamIdSize};
-use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
+use frames::{QuicFrameReader, QuicFrameType, QuicFrameWriter, ReadFrame, WriteFrame, kQuicFrameTypeSize,
+             kQuicMaxStreamIdSize};
 use proto::QuicStreamId;
-use types::{QuicFrameType, QuicVersion};
+use types::QuicVersion;
 
 /// The `BLOCKED` frame is used to indicate to the remote endpoint
 /// that this endpoint believes itself to be flow-control blocked

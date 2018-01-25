@@ -4,10 +4,9 @@ use failure::Error;
 use nom::IResult;
 
 use errors::QuicError;
-use framer::kQuicFrameTypeSize;
-use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
+use frames::{QuicFrameReader, QuicFrameType, QuicFrameWriter, ReadFrame, WriteFrame, kQuicFrameTypeSize};
 use proto::{QuicPacketNumber, QuicPacketNumberLength};
-use types::{QuicFrameType, QuicVersion};
+use types::QuicVersion;
 
 /// The `STOP_WAITING` frame is sent to inform the peer
 /// that it should not continue to wait for packets with packet numbers lower than a specified value.

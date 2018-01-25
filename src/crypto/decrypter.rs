@@ -2,6 +2,7 @@ use failure::Error;
 
 use bytes::Bytes;
 
+use crypto::{Aes128Gcm12Decrypter, ChaCha20Poly1305Decrypter, NullDecrypter};
 use proto::QuicPacketNumber;
 use types::{QuicDiversificationNonce, QuicVersion};
 
@@ -23,4 +24,16 @@ pub trait QuicDecrypter {
         associated_data: &[u8],
         cipher_text: &[u8],
     ) -> Result<Bytes, Error>;
+}
+
+pub fn null<P>() -> NullDecrypter<P> {
+    NullDecrypter::<P>::default()
+}
+
+pub fn aes128_gcm12<'a>(key: &'a [u8], nonce_prefix: &'a [u8]) -> Aes128Gcm12Decrypter<'a> {
+    Aes128Gcm12Decrypter::new(key, nonce_prefix)
+}
+
+pub fn chacha20_poly1305<'a>(key: &'a [u8], nonce_prefix: &'a [u8]) -> ChaCha20Poly1305Decrypter<'a> {
+    ChaCha20Poly1305Decrypter::new(key, nonce_prefix)
 }

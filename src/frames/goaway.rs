@@ -4,10 +4,10 @@ use failure::Error;
 use nom::IResult;
 
 use errors::{QuicError, QuicErrorCode};
-use framer::{kQuicErrorCodeSize, kQuicErrorDetailsLengthSize, kQuicFrameTypeSize, kQuicMaxStreamIdSize};
-use frames::{BufMutExt, QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
+use frames::{BufMutExt, QuicFrameReader, QuicFrameType, QuicFrameWriter, ReadFrame, WriteFrame, kQuicErrorCodeSize,
+             kQuicErrorDetailsLengthSize, kQuicFrameTypeSize, kQuicMaxStreamIdSize};
 use proto::QuicStreamId;
-use types::{QuicFrameType, QuicVersion};
+use types::QuicVersion;
 
 /// The GOAWAY frame allows for notification that the connection should stop being used,
 /// and will likely be aborted in the future. Any active streams will continue to be processed,

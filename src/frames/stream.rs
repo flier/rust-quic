@@ -7,10 +7,9 @@ use bytes::BufMut;
 use failure::{Error, Fail};
 use nom::{self, IResult, Needed};
 
-use constants::{kQuicFrameTypeStreamMask, kQuicFrameTypeStreamMask_Pre40};
 use errors::QuicError::{self, IncompletePacket};
-use framer::kQuicFrameTypeSize;
-use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
+use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame, kQuicFrameTypeSize, kQuicFrameTypeStreamMask,
+             kQuicFrameTypeStreamMask_Pre40};
 use proto::{QuicStreamId, QuicStreamOffset};
 use types::QuicVersion;
 
@@ -236,8 +235,11 @@ impl<'a> QuicStreamFrame<'a> {
         }
         // Stream ID
         buf.put_uint::<E>(u64::from(self.stream_id), stream_id_size);
-        // Offset
-        buf.put_uint::<E>(self.offset, stream_offset_size);
+
+        if stream_offset_size > 0 {
+            // Offset
+            buf.put_uint::<E>(self.offset, stream_offset_size);
+        }
         // Data length
         if quic_version <= QuicVersion::QUIC_VERSION_39 {
             if let Some(data) = self.data {

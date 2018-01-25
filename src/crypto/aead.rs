@@ -1,6 +1,7 @@
 #![allow(non_upper_case_globals)]
 
 use std::borrow::Cow;
+use std::fmt::Debug;
 use std::iter;
 use std::marker::PhantomData;
 use std::mem;
@@ -70,6 +71,7 @@ pub trait AeadAlgorithm {
 }
 
 /// `Aes128Gcm12` implements the `AEAD_AES_128_GCM_12` algorithm specified in RFC 5282.
+#[derive(Clone, Debug)]
 pub struct Aes128Gcm12 {}
 
 impl AeadAlgorithm for Aes128Gcm12 {
@@ -83,6 +85,7 @@ impl AeadAlgorithm for Aes128Gcm12 {
 }
 
 /// `ChaCha20Poly1305` implements the `AEAD_CHACHA20_POLY1305` algorithm specified in RFC 7539
+#[derive(Clone, Debug)]
 pub struct ChaCha20Poly1305 {}
 
 impl AeadAlgorithm for ChaCha20Poly1305 {
@@ -96,6 +99,7 @@ impl AeadAlgorithm for ChaCha20Poly1305 {
 }
 
 /// `AeadBaseEncrypter` is the base class of AEAD `QuicEncrypter` subclasses.
+#[derive(Clone, Debug)]
 pub struct AeadBaseEncrypter<'a, A> {
     key: Cow<'a, [u8]>,          // The key.
     nonce_prefix: Cow<'a, [u8]>, // The nonce prefix.
@@ -129,7 +133,7 @@ where
 
 impl<'a, A> QuicEncrypter for AeadBaseEncrypter<'a, A>
 where
-    A: AeadAlgorithm,
+    A: AeadAlgorithm + Clone + Debug,
 {
     fn encrypt_packet(
         &self,
@@ -174,6 +178,7 @@ where
 }
 
 /// `AeadBaseDecrypter` is the base class of AEAD `QuicDecrypter` subclasses.
+#[derive(Clone, Debug)]
 pub struct AeadBaseDecrypter<'a, A> {
     key: Cow<'a, [u8]>,          // The key.
     nonce_prefix: Cow<'a, [u8]>, // The nonce prefix.
@@ -195,7 +200,7 @@ where
 
 impl<'a, A> QuicDecrypter for AeadBaseDecrypter<'a, A>
 where
-    A: 'static + AeadAlgorithm,
+    A: 'static + AeadAlgorithm + Clone + Debug,
 {
     fn with_preliminary_key(self, nonce: &QuicDiversificationNonce) -> Box<QuicDecrypter> {
         let salt = SigningKey::new(&SHA256, nonce);

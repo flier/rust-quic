@@ -13,6 +13,15 @@ pub struct QuicData {}
 #[derive(Clone, Debug)]
 pub struct QuicEncryptedPacket(Bytes);
 
+impl<T> From<T> for QuicEncryptedPacket
+where
+    T: Into<Bytes>,
+{
+    fn from(bytes: T) -> Self {
+        QuicEncryptedPacket(bytes.into())
+    }
+}
+
 impl QuicEncryptedPacket {
     pub fn as_bytes(&self) -> &[u8] {
         self.0.as_ref()

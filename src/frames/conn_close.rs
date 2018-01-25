@@ -4,9 +4,9 @@ use failure::Error;
 use nom::IResult;
 
 use errors::{QuicError, QuicErrorCode};
-use framer::{kQuicErrorCodeSize, kQuicErrorDetailsLengthSize, kQuicFrameTypeSize};
-use frames::{BufMutExt, QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
-use types::{QuicFrameType, QuicVersion};
+use frames::{BufMutExt, QuicFrameReader, QuicFrameType, QuicFrameWriter, ReadFrame, WriteFrame, kQuicErrorCodeSize,
+             kQuicErrorDetailsLengthSize, kQuicFrameTypeSize};
+use types::QuicVersion;
 
 /// The `CONNECTION_CLOSE` frame allows for notification that the connection is being closed.
 ///

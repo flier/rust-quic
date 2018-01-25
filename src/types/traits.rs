@@ -11,6 +11,22 @@ pub trait Perspective {
     fn is_server() -> bool;
 }
 
+pub struct ForServer {}
+
+impl Perspective for ForServer {
+    fn is_server() -> bool {
+        true
+    }
+}
+
+pub struct ForClient {}
+
+impl Perspective for ForClient {
+    fn is_server() -> bool {
+        false
+    }
+}
+
 pub trait ToEndianness {
     fn endianness() -> Endianness;
 }

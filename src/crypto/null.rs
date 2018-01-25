@@ -7,6 +7,7 @@ use extprim::u128::u128;
 use failure::{Error, Fail};
 use nom::{IResult, le_u32, le_u64};
 
+use constants::kMaxPacketSize;
 use crypto::{QuicDecrypter, QuicEncrypter};
 use crypto::fnv::{fnv1a, kOffset};
 use errors::QuicError;
@@ -65,11 +66,15 @@ where
     }
 
     fn max_plaintext_size(&self, ciphertext_size: usize) -> usize {
-        ciphertext_size - kHashSizeShort
+        ciphertext_size
+            .checked_sub(kHashSizeShort)
+            .unwrap_or_default()
     }
 
     fn ciphertext_size(&self, plaintext_size: usize) -> usize {
-        plaintext_size + kHashSizeShort
+        plaintext_size
+            .checked_add(kHashSizeShort)
+            .unwrap_or(kMaxPacketSize)
     }
 }
 

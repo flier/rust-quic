@@ -2,16 +2,17 @@ use std::cmp;
 use std::mem;
 use std::ops::Deref;
 
-use byteorder::ByteOrder;
 use bytes::{BufMut, Bytes};
 use failure::Error;
 
+use constants::kDefaultMaxPacketSize;
+use crypto::QuicEncrypter;
 use errors::QuicError;
-use framer::{FrameWriter, QuicFramer, kQuicStreamPayloadLengthSize};
-use frames::{PaddingBytes, QuicFrame, WriteFrame};
-use packet::{QuicPacketHeader, QuicPacketPublicHeader};
+use framer::{FrameWriter, QuicFramer};
+use frames::{PaddingBytes, QuicFrame, QuicFrameType, WriteFrame, kQuicStreamPayloadLengthSize};
+use packet::{QuicEncryptedPacket, QuicPacketHeader, QuicPacketPublicHeader};
 use proto::{QuicConnectionId, QuicPacketNumber, QuicPacketNumberLength};
-use types::{EncryptionLevel, QuicDiversificationNonce, QuicFrameType};
+use types::{EncryptionLevel, QuicDiversificationNonce};
 
 pub struct QuicPacketCreator<'a, T, V>
 where
@@ -19,7 +20,7 @@ where
     V: 'a,
 {
     connection_id: QuicConnectionId,
-    framer: &'a QuicFramer<'a, T, V>,
+    framer: &'a mut QuicFramer<'a, T, V>,
 
     // Packet used to invoke `on_serialized_packet`.
     packet: SerializedPacket,
@@ -48,8 +49,8 @@ where
     T: Deref<Target = V>,
     V: ,
 {
-    pub fn new(connection_id: QuicConnectionId, framer: &'a QuicFramer<'a, T, V>) -> Self {
-        QuicPacketCreator {
+    pub fn new(connection_id: QuicConnectionId, framer: &'a mut QuicFramer<'a, T, V>) -> Self {
+        let mut creator = QuicPacketCreator {
             connection_id,
             framer,
             packet: SerializedPacket::default(),
@@ -59,7 +60,21 @@ where
             max_plaintext_size: 0,
             packet_size: 0,
             pending_padding_bytes: None,
-        }
+        };
+
+        creator.set_max_packet_length(kDefaultMaxPacketSize);
+
+        creator
+    }
+
+    pub fn set_encrypter(&mut self, level: EncryptionLevel, encrypter: Box<QuicEncrypter>) {
+        self.framer.set_encrypter(level, encrypter);
+        self.max_plaintext_size = self.framer.max_plaintext_size(self.max_packet_length);
+    }
+
+    // Sets the encryption level that will be applied to new packets.
+    fn set_encryption_level(&mut self, level: EncryptionLevel) {
+        self.packet.encryption_level = level;
     }
 
     pub fn set_max_packet_length(&mut self, len: usize) {
@@ -70,9 +85,8 @@ where
     /// Serializes all frames which have been added and adds any which should be
     /// retransmitted to packet.retransmittable_frames.
     /// All frames must fit into a single packet.
-    pub fn serialize_packet<E, B>(&mut self, buf: &mut B) -> Result<(), Error>
+    pub fn serialize_packet<B>(&mut self, buf: &mut B) -> Result<(), Error>
     where
-        E: ByteOrder,
         B: BufMut + AsRef<[u8]>,
     {
         self.maybe_add_padding()?;
@@ -233,4 +247,90 @@ pub struct SerializedPacket {
     encryption_level: EncryptionLevel,
     padding_bytes: Option<PaddingBytes>,
     encrypted_payload: Option<Bytes>,
+}
+
+impl SerializedPacket {
+    fn as_encrypted_packet(&self) -> Option<QuicEncryptedPacket> {
+        self.encrypted_payload
+            .as_ref()
+            .map(|payload| QuicEncryptedPacket::from(payload.clone()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use time::Timespec;
+
+    use constants::kCryptoStreamId;
+    use crypto::encrypter;
+    use framer::mocks::MockFramerVisitor;
+    use types::{ForClient, ForServer, QuicVersion};
+
+    use super::*;
+
+    impl<'a, T, V> QuicPacketCreator<'a, T, V>
+    where
+        T: Deref<Target = V>,
+    {
+        fn serialize_all_frames(&mut self, frames: Vec<QuicFrame<'a>>) -> Result<SerializedPacket, Error> {
+            debug_assert!(self.frames.is_empty());
+            debug_assert!(!frames.is_empty());
+
+            self.frames.clear();
+
+            for frame in frames {
+                self.add_frame(frame)?;
+            }
+
+            let mut buf = vec![];
+
+            self.serialize_packet(&mut buf)?;
+
+            Ok(self.packet.clone())
+        }
+    }
+
+    #[test]
+    fn serialize_frames() {
+        let framer_visitor = MockFramerVisitor::default();
+
+        let mut client_framer = QuicFramer::new::<ForClient>(QuicVersion::all_supported(), Timespec::new(0, 0));
+        let mut server_framer = QuicFramer::new::<ForClient>(QuicVersion::all_supported(), Timespec::new(0, 0));
+
+        client_framer.set_visitor(&framer_visitor);
+        server_framer.set_visitor(&framer_visitor);
+
+        let mut creator = QuicPacketCreator::new(2, &mut client_framer);
+
+        creator.set_encrypter(
+            EncryptionLevel::Initial,
+            Box::new(encrypter::null::<ForClient>()),
+        );
+        creator.set_encrypter(
+            EncryptionLevel::ForwardSecure,
+            Box::new(encrypter::null::<ForClient>()),
+        );
+
+        let frames = vec![
+            QuicFrame::ack(0),
+            QuicFrame::stream(kCryptoStreamId, 0, false, None),
+            QuicFrame::stream(kCryptoStreamId, 0, true, None),
+        ];
+
+        for &encryption_level in &[
+            EncryptionLevel::None,
+            EncryptionLevel::Initial,
+            EncryptionLevel::ForwardSecure,
+        ] {
+            creator.set_encryption_level(encryption_level);
+
+            let serialized_packet = creator.serialize_all_frames(frames.clone()).unwrap();
+
+            assert_eq!(serialized_packet.encryption_level, encryption_level);
+
+            let encrypted_packet = serialized_packet.as_encrypted_packet().unwrap();
+
+            server_framer.process_packet::<ForServer>(&encrypted_packet);
+        }
+    }
 }

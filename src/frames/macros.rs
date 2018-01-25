@@ -2,7 +2,7 @@ use nom::be_u8;
 use num::FromPrimitive;
 
 use errors::QuicErrorCode;
-use types::QuicFrameType;
+use frames::QuicFrameType;
 
 #[macro_export]
 macro_rules! extract_bits {
