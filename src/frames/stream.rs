@@ -389,11 +389,9 @@ mod tests {
                 buf.len()
             );
             assert_eq!(
-                &buf,
-                &payload,
+                &buf, &payload,
                 "write stream frame {:?}, version {:?}",
-                stream_frame,
-                quic_version
+                stream_frame, quic_version
             );
         }
     }

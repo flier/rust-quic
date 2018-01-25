@@ -217,8 +217,7 @@ impl QuicAckFrame {
 
             // Number of timestamps
             if buf.remaining_mut() >= self.size(quic_version) {
-                buf.put_u8(self.received_packet_times.as_ref().map_or(0, |v| v.len())
-                    as u8);
+                buf.put_u8(self.received_packet_times.as_ref().map_or(0, |v| v.len()) as u8);
             } else {
                 buf.put_u8(0);
             }
@@ -266,8 +265,7 @@ impl QuicAckFrame {
         if quic_version <= QuicVersion::QUIC_VERSION_39 {
             // Number of timestamps
             if buf.remaining_mut() >= self.size(quic_version) {
-                buf.put_u8(self.received_packet_times.as_ref().map_or(0, |v| v.len())
-                    as u8);
+                buf.put_u8(self.received_packet_times.as_ref().map_or(0, |v| v.len()) as u8);
             } else {
                 buf.put_u8(0);
             }
@@ -329,9 +327,10 @@ impl QuicAckFrame {
         match self.packets
             .ranges
             .iter()
-            .fold((0, self.largest_observed + 1), |(acc, last), &(min, max)| {
-                (acc + (last - max) / MAX_U8 + 1, min)
-            })
+            .fold(
+                (0, self.largest_observed + 1),
+                |(acc, last), &(min, max)| (acc + (last - max) / MAX_U8 + 1, min),
+            )
             .0
         {
             0 | 1 => ack_block_length,
@@ -573,11 +572,9 @@ mod tests {
                 quic_version,
             );
             assert_eq!(
-                &buf,
-                &payload,
+                &buf, &payload,
                 "write ACK frame {:?}, version {:?}",
-                ack_frame,
-                quic_version
+                ack_frame, quic_version
             );
         }
     }
@@ -743,11 +740,9 @@ mod tests {
                 quic_version,
             );
             assert_eq!(
-                &buf,
-                &payload,
+                &buf, &payload,
                 "write ACK frame {:?}, version {:?}",
-                ack_frame,
-                quic_version
+                ack_frame, quic_version
             );
         }
     }
@@ -935,11 +930,9 @@ mod tests {
                 quic_version,
             );
             assert_eq!(
-                &buf,
-                &payload,
+                &buf, &payload,
                 "write ACK frame {:?}, version {:?}",
-                ack_frame,
-                quic_version
+                ack_frame, quic_version
             );
         }
     }

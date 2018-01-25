@@ -4,7 +4,7 @@ use failure::Error;
 use nom::IResult;
 
 use errors::{QuicError, QuicErrorCode};
-use framer::{kQuicFrameTypeSize, kQuicMaxStreamIdSize, kQuicErrorCodeSize, kQuicErrorDetailsLengthSize};
+use framer::{kQuicErrorCodeSize, kQuicErrorDetailsLengthSize, kQuicFrameTypeSize, kQuicMaxStreamIdSize};
 use frames::{BufMutExt, QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
 use proto::QuicStreamId;
 use types::{QuicFrameType, QuicVersion};

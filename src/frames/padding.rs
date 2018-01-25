@@ -3,8 +3,8 @@ use bytes::BufMut;
 use failure::Error;
 use nom::Needed;
 
-use framer::kQuicFrameTypeSize;
 use errors::QuicError;
+use framer::kQuicFrameTypeSize;
 use frames::{QuicFrameReader, QuicFrameWriter, ReadFrame, WriteFrame};
 use types::{QuicFrameType, QuicVersion};
 

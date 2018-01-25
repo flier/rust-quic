@@ -258,7 +258,8 @@ where
                     // Frame fits within packet. Note that acks may be truncated.
                     frame_size
                 } else {
-                    // Only truncate the first frame in a packet, so if subsequent ones go over, stop including more frames.
+                    // Only truncate the first frame in a packet,
+                    // so if subsequent ones go over, stop including more frames.
                     0
                 }
             }
@@ -368,9 +369,10 @@ where
         );
 
         if message.tag() != kPRST {
-            bail!(InvalidResetPacket(
-                format!("incorrect message tag: {}", message.tag())
-            ));
+            bail!(InvalidResetPacket(format!(
+                "incorrect message tag: {}",
+                message.tag()
+            )));
         }
 
         let packet = QuicPublicResetPacket {

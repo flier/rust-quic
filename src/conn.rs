@@ -72,9 +72,10 @@ where
     where
         P: 'static + Perspective,
     {
-        let framer = Rc::new(RefCell::new(
-            QuicFramer::new::<P>(supported_versions, time::get_time()),
-        ));
+        let framer = Rc::new(RefCell::new(QuicFramer::new::<P>(
+            supported_versions,
+            time::get_time(),
+        )));
         let inner = Rc::new(Inner {
             connection_id,
             is_server: P::is_server(),
