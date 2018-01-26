@@ -4,10 +4,12 @@ use bytes::Bytes;
 
 use crypto::{Aes128Gcm12Decrypter, ChaCha20Poly1305Decrypter, NullDecrypter};
 use proto::QuicPacketNumber;
-use types::{QuicDiversificationNonce, QuicVersion};
+use types::{QuicDiversificationNonce, QuicTag, QuicVersion};
 
 /// `QuicDecrypter` implements the QUIC decrypter
 pub trait QuicDecrypter {
+    fn tag(&self) -> QuicTag;
+
     /// Sets the encryption key.
     ///
     /// `decrypt_packet` may not be called until `with_preliminary_key` is called and

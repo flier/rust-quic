@@ -198,7 +198,9 @@ impl<'a> ReadFrame<'a> for QuicFrame<'a> {
         R: QuicFrameReader<'a>,
     {
         if let Some(&frame_type) = payload.first() {
-            match QuicFrameType::with_version(reader.quic_version(), frame_type)? {
+            let frame_type = QuicFrameType::with_version(reader.quic_version(), frame_type)?;
+
+            match frame_type {
                 QuicFrameType::Padding => reader
                     .read_frame::<QuicPaddingFrame>(payload)
                     .map(|(frame, remaining)| (QuicFrame::Padding(frame), remaining)),
@@ -238,7 +240,16 @@ impl<'a> ReadFrame<'a> for QuicFrame<'a> {
                 QuicFrameType::Ack => reader
                     .read_frame::<QuicAckFrame>(payload)
                     .map(|(frame, remaining)| (QuicFrame::Ack(frame), remaining)),
-            }
+            }.map_err(|err| {
+                debug!(
+                    "fail to parse {:?} frame, {}\n{}",
+                    frame_type,
+                    err,
+                    hexdump!(payload)
+                );
+
+                err
+            })
         } else {
             bail!(IncompletePacket(Needed::Unknown))
         }
@@ -272,17 +283,35 @@ impl<'a> WriteFrame<'a> for QuicFrame<'a> {
         W: QuicFrameWriter<'a>,
         B: BufMut,
     {
-        match *self {
-            QuicFrame::Padding(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
-            QuicFrame::ResetStream(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
-            QuicFrame::ConnectionClose(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
-            QuicFrame::GoAway(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
-            QuicFrame::WindowUpdate(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
-            QuicFrame::Blocked(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
-            QuicFrame::StopWaiting(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
-            QuicFrame::Ping(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
-            QuicFrame::Stream(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
-            QuicFrame::Ack(ref frame) => frame.write_frame::<E, W, B>(writer, buf),
-        }
+        let mark = buf.remaining_mut();
+        let wrote = match *self {
+            QuicFrame::Padding(ref frame) => frame.write_frame::<E, W, B>(writer, buf)?,
+            QuicFrame::ResetStream(ref frame) => frame.write_frame::<E, W, B>(writer, buf)?,
+            QuicFrame::ConnectionClose(ref frame) => frame.write_frame::<E, W, B>(writer, buf)?,
+            QuicFrame::GoAway(ref frame) => frame.write_frame::<E, W, B>(writer, buf)?,
+            QuicFrame::WindowUpdate(ref frame) => frame.write_frame::<E, W, B>(writer, buf)?,
+            QuicFrame::Blocked(ref frame) => frame.write_frame::<E, W, B>(writer, buf)?,
+            QuicFrame::StopWaiting(ref frame) => frame.write_frame::<E, W, B>(writer, buf)?,
+            QuicFrame::Ping(ref frame) => frame.write_frame::<E, W, B>(writer, buf)?,
+            QuicFrame::Stream(ref frame) => frame.write_frame::<E, W, B>(writer, buf)?,
+            QuicFrame::Ack(ref frame) => frame.write_frame::<E, W, B>(writer, buf)?,
+        };
+        let size = mark - buf.remaining_mut();
+
+        debug_assert_eq!(
+            wrote,
+            size,
+            "frame {:?} should be {} bytes",
+            self.frame_type(),
+            size
+        );
+        debug!(
+            "write {} bytes {:?} frame: {:?}",
+            size,
+            self.frame_type(),
+            self
+        );
+
+        Ok(size)
     }
 }

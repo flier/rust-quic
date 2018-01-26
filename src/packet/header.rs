@@ -11,7 +11,8 @@ use nom::{IResult, Needed, be_u64, be_u8};
 
 use constants::{kPublicFlagsSize, kQuicVersionSize};
 use errors::QuicError::{self, IncompletePacket};
-use proto::{QuicConnectionId, QuicPacketNumber, QuicPacketNumberLength, QuicPacketNumberLengthFlags};
+use proto::{QuicConnectionId, QuicConnectionIdLength, QuicPacketNumber, QuicPacketNumberLength,
+            QuicPacketNumberLengthFlags};
 use types::{QuicDiversificationNonce, QuicTag, QuicVersion};
 
 const kPublicHeaderConnectionIdSize: usize = 8;
@@ -93,7 +94,7 @@ impl<'a> QuicPacketPublicHeader<'a> {
             kDiversificationNonceSize
         } else {
             0
-        } + self.packet_number_length as usize
+        }
     }
 
     pub fn write_to<E, B>(&self, buf: &mut B) -> Result<usize, Error>
@@ -122,19 +123,19 @@ impl<'a> QuicPacketPublicHeader<'a> {
             public_flags.bits() | (self.packet_number_length.as_flags() as u8) << kPublicHeaderSequenceNumberShift,
         );
 
-        let mut wrote = 1;
+        let mut wrote = mem::size_of::<u8>();
 
         if let Some(connection_id) = self.connection_id {
             buf.put_u64::<NetworkEndian>(connection_id);
 
-            wrote += mem::size_of::<u64>();
+            wrote += QuicConnectionIdLength::PACKET_8BYTE_CONNECTION_ID as usize;
         }
 
         if let Some(ref versions) = self.versions {
             if let Some(&version) = versions.first() {
                 buf.put_slice(QuicTag::from(version).as_bytes());
 
-                wrote += mem::size_of::<u32>();
+                wrote += QuicTag::size();
             }
         }
 
@@ -167,14 +168,18 @@ impl<'a> QuicPacketHeader<'a> {
         }
 
         let packet_number = E::read_uint(remaining, packet_number_length);
+        let packet_header = QuicPacketHeader {
+            public_header,
+            packet_number,
+        };
 
-        Ok((
-            QuicPacketHeader {
-                public_header,
-                packet_number,
-            },
-            &remaining[packet_number_length..],
-        ))
+        debug!(
+            "parsed {} bytes packet header: {:?}",
+            buf.len() - remaining.len(),
+            packet_header
+        );
+
+        Ok((packet_header, &remaining[packet_number_length..]))
     }
 
     pub fn size(&self) -> usize {
@@ -186,14 +191,16 @@ impl<'a> QuicPacketHeader<'a> {
         E: ByteOrder,
         B: BufMut,
     {
-        let header_size = self.public_header.write_to::<E, B>(buf)?;
+        let header_size = self.public_header.write_to::<E, B>(buf)? + self.packet_number_length as usize;
 
         buf.put_uint::<E>(
             self.packet_number,
             self.public_header.packet_number_length as usize,
         );
 
-        Ok(header_size + self.packet_number_length as usize)
+        debug!("write {} bytes packet header: {:?}", header_size, self);
+
+        Ok(header_size)
     }
 }
 
@@ -310,6 +317,7 @@ mod tests {
             packet_header.write_to::<NativeEndian, _>(&mut buf).unwrap(),
             packet38.len()
         );
+        assert_eq!(packet_header.size(), packet38.len());
         assert_eq!(buf.as_slice(), packet38);
 
         buf.clear();
@@ -320,6 +328,7 @@ mod tests {
                 .unwrap(),
             packet39.len()
         );
+        assert_eq!(packet_header.size(), packet39.len());
         assert_eq!(buf.as_slice(), packet39);
     }
 }

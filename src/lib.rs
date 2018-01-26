@@ -15,6 +15,7 @@ extern crate extprim_literals;
 extern crate failure;
 #[macro_use]
 extern crate failure_derive;
+extern crate hexplay;
 #[macro_use]
 extern crate log;
 #[macro_use]
@@ -34,6 +35,7 @@ extern crate matches;
 #[cfg(test)]
 extern crate pretty_env_logger;
 
+#[macro_use]
 mod errors;
 mod constants;
 #[macro_use]

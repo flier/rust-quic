@@ -18,6 +18,7 @@ num-derive= "0.1"
 time = "0.1"
 ring = { git = "https://github.com/flier/ring.git", branch = "with_auth_tag_len" }
 prometheus = "0.3"
+hexplay = "0.2"
 
 clippy = { version = "*", optional = true }
 
@@ -26,6 +27,6 @@ version = "3.2"
 features = ["verbose-errors"]
 
 [dev-dependencies]
-pretty_env_logger = "0.1"
+pretty_env_logger = "0.2"
 matches = "0.1"
 hex = "0.3"

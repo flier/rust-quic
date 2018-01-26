@@ -274,6 +274,10 @@ impl QuicAckFrame {
 
                 frame_size += kQuicAckBlockGapSize + ack_block_length as usize;
             }
+        } else {
+            buf.put_uint::<E>(0, ack_block_length as usize);
+
+            frame_size += ack_block_length as usize;
         }
 
         // Ack blocks.
@@ -380,7 +384,7 @@ named_args!(parse_quic_ack_frame(quic_version: QuicVersion,
             nom::ErrorKind::Custom(FirstAckBlockLengthOverflow as u32),
             verify!(
                 uint!(quic_version.endianness(), ack_block_length as usize),
-                |first_block_length| first_block_length < largest_observed + 1
+                |first_block_length| first_block_length <= largest_observed + 1
             )
         ) >>
         first_received: value!(largest_observed + 1 - first_block_length) >>

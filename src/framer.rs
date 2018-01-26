@@ -25,7 +25,7 @@ use types::{EncryptionLevel, Perspective, QuicTime, QuicTimeDelta, QuicVersion, 
 
 pub trait QuicFramerVisitor {
     /// Called when a new packet has been received, before it has been validated or processed.
-    fn on_packet(&self) {}
+    fn on_packet(&self, _packet: &QuicEncryptedPacket) {}
 
     /// Called when the public header has been parsed, but has not been authenticated.
     /// If it returns false, framing for this packet will cease.
@@ -158,6 +158,20 @@ where
         }
     }
 
+    pub fn with_visitor<P>(supported_versions: &'a [QuicVersion], creation_time: QuicTime, visitor: T) -> Self
+    where
+        P: 'static + Perspective,
+    {
+        QuicFramer {
+            supported_versions,
+            quic_version: supported_versions[0],
+            creation_time,
+            encrypters: [Some(Box::new(NullEncrypter::<P>::default())), None, None],
+            visitor: Some(visitor),
+            state: RefCell::new(State::new::<P>()),
+        }
+    }
+
     /// Changes the encrypter used for level `level` to `encrypter`.
     pub fn set_encrypter(&mut self, level: EncryptionLevel, encrypter: Box<QuicEncrypter>) {
         self.encrypters[level as usize] = Some(encrypter);
@@ -172,12 +186,18 @@ where
         plain_text: &[u8],
     ) -> Result<Bytes, Error> {
         if let Some(encrypter) = self.encrypters[level as usize].as_ref() {
-            encrypter.encrypt_packet(
+            debug!("encrypt payload with {} encrypter", encrypter.tag());
+
+            let mut buf = Bytes::from(associated_data);
+
+            buf.extend_from_slice(&encrypter.encrypt_packet(
                 self.quic_version,
                 packet_number,
                 associated_data,
                 plain_text,
-            )
+            )?);
+
+            Ok(buf)
         } else {
             bail!(QuicError::EncryptionFailure(packet_number))
         }
@@ -271,7 +291,7 @@ where
         E: ByteOrder + ToEndianness,
     {
         if let Some(ref visitor) = self.visitor {
-            visitor.on_packet();
+            visitor.on_packet(packet);
         }
 
         // First parse the public header.
@@ -284,7 +304,7 @@ where
         }
 
         if let Some(ref visitor) = self.visitor {
-            if visitor.on_unauthenticated_public_header(&public_header) {
+            if !visitor.on_unauthenticated_public_header(&public_header) {
                 // The visitor suppresses further processing of the packet.
                 return Ok(());
             }
@@ -471,6 +491,17 @@ where
     {
         let associated_data = &packet.as_bytes()[..header.size()];
 
+        debug!(
+            "decrypt {} bytes payload with {} bytes associated data",
+            input.len(),
+            associated_data.len()
+        );
+        trace!(
+            "associated data:\n{}\nplain text:\n{}",
+            hexdump!(associated_data),
+            hexdump!(input, offset => associated_data.len())
+        );
+
         if let Ok(decrypted) = self.state.borrow().decrypter.decrypt_packet(
             self.quic_version,
             header.packet_number,
@@ -480,6 +511,13 @@ where
             if let Some(ref visitor) = self.visitor {
                 visitor.on_decrypted_packet(self.state.borrow().decrypter_level);
             }
+
+            debug!(
+                "decrypted {} bytes data with {} decrypter",
+                decrypted.len(),
+                self.state.borrow().decrypter.tag()
+            );
+            trace!("plain data:\n{}", hexdump!(&decrypted));
 
             return Ok(decrypted);
         }
@@ -495,6 +533,13 @@ where
                     associated_data,
                     input,
                 ) {
+                    debug!(
+                        "decrypted {} bytes data with {} alternative decrypter",
+                        decrypted.len(),
+                        decrypter.tag()
+                    );
+                    trace!("plain data:\n{}", hexdump!(&decrypted));
+
                     if let Some(ref visitor) = self.visitor {
                         visitor.on_decrypted_packet(self.state.borrow().alternative_decrypter_level);
                     }
@@ -523,6 +568,8 @@ where
     }
 
     fn process_frame_data(&self, header: &QuicPacketHeader, payload: &[u8]) -> Result<(), Error> {
+        debug!("process {} bytes frame data", payload.len());
+
         let reader = FrameReader::new(self, header);
 
         for frame in reader.read_frames(payload) {
@@ -815,10 +862,221 @@ named!(
 
 #[cfg(test)]
 pub mod mocks {
+    use std::collections::VecDeque;
+
     use super::*;
 
-    #[derive(Default)]
-    pub struct MockFramerVisitor {}
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum QuicFramerEvent {
+        OnPacket,
+        OnUnauthenticatedPublicHeader,
+        OnProtocolVersionMismatch(QuicVersion),
+        OnVersionNegotiationPacket,
+        OnPublicResetPacket,
+        OnUnauthenticatedHeader,
+        OnDecryptedPacket(EncryptionLevel),
+        OnPacketHeader,
+        OnStreamFrame,
+        OnAckFrame,
+        OnPaddingFrame,
+        OnRstStreamFrame,
+        OnConnectionCloseFrame,
+        OnGoAwayFrame,
+        OnWindowUpdateFrame,
+        OnBlockedFrame,
+        OnStopWaitingFrame,
+        OnPingFrame,
+        OnPacketComplete,
+    }
 
-    impl QuicFramerVisitor for MockFramerVisitor {}
+    #[derive(Default)]
+    pub struct MockFramerVisitor {
+        pub expected_events: Option<RefCell<VecDeque<QuicFramerEvent>>>,
+        pub fired_events: RefCell<Vec<QuicFramerEvent>>,
+    }
+
+    impl MockFramerVisitor {
+        pub fn with_expected_events<I>(expected_events: I) -> Self
+        where
+            I: IntoIterator<Item = QuicFramerEvent>,
+        {
+            let mut visitor = MockFramerVisitor::default();
+
+            visitor.expected_events = Some(RefCell::new(expected_events.into_iter().collect()));
+
+            visitor
+        }
+
+        pub fn verify(&self) {
+            if let Some(ref events) = self.expected_events {
+                assert!(
+                    events.borrow().is_empty(),
+                    "fired events: {:?}, and expected events should be empty: {:?}",
+                    self.fired_events.borrow(),
+                    events.borrow()
+                );
+            }
+        }
+
+        fn on_event(&self, event: QuicFramerEvent) {
+            if let Some(ref events) = self.expected_events {
+                let expected_event = events.borrow_mut().pop_front();
+
+                assert_eq!(
+                    expected_event,
+                    Some(event.clone()),
+                    "expect {:?} but got {:?} event",
+                    expected_event,
+                    event
+                );
+            }
+
+            self.fired_events.borrow_mut().push(event);
+        }
+    }
+
+    impl QuicFramerVisitor for MockFramerVisitor {
+        fn on_packet(&self, packet: &QuicEncryptedPacket) {
+            debug!("on_packet(QuicEncryptedPacket(..))");
+            trace!("encrypted packet:\n{}", hexdump!(packet));
+
+            self.on_event(QuicFramerEvent::OnPacket);
+        }
+
+        fn on_unauthenticated_public_header(&self, header: &QuicPacketPublicHeader) -> bool {
+            debug!("on_unauthenticated_public_header({:?})", header);
+
+            self.on_event(QuicFramerEvent::OnUnauthenticatedPublicHeader);
+
+            true
+        }
+
+        fn on_protocol_version_mismatch(&self, received_version: QuicVersion) -> bool {
+            debug!("on_protocol_version_mismatch({:?})", received_version);
+
+            self.on_event(QuicFramerEvent::OnProtocolVersionMismatch(received_version));
+
+            false
+        }
+
+        fn on_version_negotiation_packet(&self, packet: QuicVersionNegotiationPacket) {
+            debug!("on_version_negotiation_packet({:?})", packet);
+
+            self.on_event(QuicFramerEvent::OnVersionNegotiationPacket);
+        }
+
+        fn on_public_reset_packet(&self, packet: QuicPublicResetPacket) {
+            debug!("on_public_reset_packet({:?})", packet);
+
+            self.on_event(QuicFramerEvent::OnPublicResetPacket);
+        }
+
+        fn on_unauthenticated_header(&self, header: &QuicPacketHeader) -> bool {
+            debug!("on_unauthenticated_header({:?})", header);
+
+            self.on_event(QuicFramerEvent::OnUnauthenticatedHeader);
+
+            true
+        }
+
+        fn on_decrypted_packet(&self, level: EncryptionLevel) {
+            debug!("on_decrypted_packet({:?})", level);
+
+            self.on_event(QuicFramerEvent::OnDecryptedPacket(level));
+        }
+
+        fn on_packet_header(&self, header: &QuicPacketHeader) -> bool {
+            debug!("on_packet_header({:?})", header);
+
+            self.on_event(QuicFramerEvent::OnPacketHeader);
+
+            true
+        }
+
+        fn on_stream_frame(&self, frame: QuicStreamFrame) -> bool {
+            debug!("on_stream_frame({:?})", frame);
+
+            self.on_event(QuicFramerEvent::OnStreamFrame);
+
+            true
+        }
+
+        fn on_ack_frame(&self, frame: QuicAckFrame) -> bool {
+            debug!("on_ack_frame({:?})", frame);
+
+            self.on_event(QuicFramerEvent::OnAckFrame);
+
+            true
+        }
+
+        fn on_padding_frame(&self, frame: QuicPaddingFrame) -> bool {
+            debug!("on_padding_frame({:?})", frame);
+
+            self.on_event(QuicFramerEvent::OnPaddingFrame);
+
+            true
+        }
+
+        fn on_reset_stream_frame(&self, frame: QuicRstStreamFrame) -> bool {
+            debug!("on_reset_stream_frame({:?})", frame);
+
+            self.on_event(QuicFramerEvent::OnRstStreamFrame);
+
+            true
+        }
+
+        fn on_connection_close_frame(&self, frame: QuicConnectionCloseFrame) -> bool {
+            debug!("on_connection_close_frame({:?})", frame);
+
+            self.on_event(QuicFramerEvent::OnConnectionCloseFrame);
+
+            true
+        }
+
+        fn on_go_away_frame(&self, frame: QuicGoAwayFrame) -> bool {
+            debug!("on_go_away_frame({:?})", frame);
+
+            self.on_event(QuicFramerEvent::OnGoAwayFrame);
+
+            true
+        }
+
+        fn on_window_update_frame(&self, frame: QuicWindowUpdateFrame) -> bool {
+            debug!("on_window_update_frame({:?})", frame);
+
+            self.on_event(QuicFramerEvent::OnWindowUpdateFrame);
+
+            true
+        }
+
+        fn on_blocked_frame(&self, frame: QuicBlockedFrame) -> bool {
+            debug!("on_blocked_frame({:?})", frame);
+
+            self.on_event(QuicFramerEvent::OnBlockedFrame);
+
+            true
+        }
+
+        fn on_stop_waiting_frame(&self, frame: QuicStopWaitingFrame) -> bool {
+            debug!("on_stop_waiting_frame({:?})", frame);
+
+            self.on_event(QuicFramerEvent::OnStopWaitingFrame);
+
+            true
+        }
+
+        fn on_ping_frame(&self, frame: QuicPingFrame) -> bool {
+            debug!("on_ping_frame({:?})", frame);
+
+            self.on_event(QuicFramerEvent::OnPingFrame);
+
+            true
+        }
+
+        fn on_packet_complete(&self) {
+            debug!("on_packet_complete()");
+
+            self.on_event(QuicFramerEvent::OnPacketComplete);
+        }
+    }
 }

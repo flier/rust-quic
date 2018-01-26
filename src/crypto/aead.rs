@@ -15,10 +15,10 @@ use ring::digest::SHA256;
 use ring::hkdf::extract_and_expand;
 use ring::hmac::SigningKey;
 
-use crypto::{QuicDecrypter, QuicEncrypter};
+use crypto::{QuicDecrypter, QuicEncrypter, kAESG, kCC20};
 use errors::QuicError::*;
 use proto::QuicPacketNumber;
-use types::{QuicDiversificationNonce, QuicVersion};
+use types::{QuicDiversificationNonce, QuicTag, QuicVersion};
 
 const kAuthTagSize: usize = 12;
 const kNoncePrefixSize: usize = 4;
@@ -63,6 +63,9 @@ pub type ChaCha20Poly1305Decrypter<'a> = AeadBaseDecrypter<'a, ChaCha20Poly1305>
 
 /// `AeadAlgorithm` implements the AEAD algorithm.
 pub trait AeadAlgorithm {
+    /// The tag of algorithm.
+    fn tag() -> QuicTag;
+
     /// The name of algorithm.
     fn name() -> &'static str;
 
@@ -75,6 +78,10 @@ pub trait AeadAlgorithm {
 pub struct Aes128Gcm12 {}
 
 impl AeadAlgorithm for Aes128Gcm12 {
+    fn tag() -> QuicTag {
+        kAESG
+    }
+
     fn name() -> &'static str {
         "AES128_GCM12"
     }
@@ -89,6 +96,10 @@ impl AeadAlgorithm for Aes128Gcm12 {
 pub struct ChaCha20Poly1305 {}
 
 impl AeadAlgorithm for ChaCha20Poly1305 {
+    fn tag() -> QuicTag {
+        kCC20
+    }
+
     fn name() -> &'static str {
         "AEAD_CHACHA20_POLY1305"
     }
@@ -135,6 +146,10 @@ impl<'a, A> QuicEncrypter for AeadBaseEncrypter<'a, A>
 where
     A: AeadAlgorithm + Clone + Debug,
 {
+    fn tag(&self) -> QuicTag {
+        A::tag()
+    }
+
     fn encrypt_packet(
         &self,
         _version: QuicVersion,
@@ -202,6 +217,10 @@ impl<'a, A> QuicDecrypter for AeadBaseDecrypter<'a, A>
 where
     A: 'static + AeadAlgorithm + Clone + Debug,
 {
+    fn tag(&self) -> QuicTag {
+        A::tag()
+    }
+
     fn with_preliminary_key(self, nonce: &QuicDiversificationNonce) -> Box<QuicDecrypter> {
         let salt = SigningKey::new(&SHA256, nonce);
         let mut secret = self.key.to_vec();

@@ -68,6 +68,12 @@ where
     }
 
     pub fn set_encrypter(&mut self, level: EncryptionLevel, encrypter: Box<QuicEncrypter>) {
+        debug!(
+            "set {:?} level encryption with {} encrypter",
+            level,
+            encrypter.tag()
+        );
+
         self.framer.set_encrypter(level, encrypter);
         self.max_plaintext_size = self.framer.max_plaintext_size(self.max_packet_length);
     }
@@ -89,6 +95,8 @@ where
     where
         B: BufMut + AsRef<[u8]>,
     {
+        debug!("serialize {} frames to packet", self.frames.len());
+
         self.maybe_add_padding()?;
 
         let frames = mem::replace(&mut self.frames, vec![]);
@@ -103,6 +111,12 @@ where
 
             (&buf[..header_size], &buf[header_size..])
         };
+
+        trace!(
+            "associated data:\n{}\nplain text:\n{}",
+            hexdump!(associated_data),
+            hexdump!(plain_text, offset => associated_data.len())
+        );
 
         self.packet.encrypted_payload = Some(self.framer.encrypt_payload(
             self.packet.encryption_level,
@@ -208,6 +222,8 @@ where
     }
 
     fn add_frame(&mut self, frame: QuicFrame<'a>) -> Result<(), Error> {
+        debug!("add frame: {:?}", frame);
+
         let frame_size = self.expandsion_on_new_frame() + {
             let header = self.packet_header();
             let writer = FrameWriter::new(self.framer, &header);
@@ -236,6 +252,8 @@ where
     }
 
     fn flush(&self) -> Result<(), Error> {
+        trace!("flush frames to packet");
+
         Ok(())
     }
 }
@@ -259,11 +277,13 @@ impl SerializedPacket {
 
 #[cfg(test)]
 mod tests {
+    use pretty_env_logger;
     use time::Timespec;
 
     use constants::kCryptoStreamId;
     use crypto::encrypter;
     use framer::mocks::MockFramerVisitor;
+    use framer::mocks::QuicFramerEvent::*;
     use types::{ForClient, ForServer, QuicVersion};
 
     use super::*;
@@ -292,13 +312,15 @@ mod tests {
 
     #[test]
     fn serialize_frames() {
+        let _ = pretty_env_logger::try_init();
+
         let framer_visitor = MockFramerVisitor::default();
 
-        let mut client_framer = QuicFramer::new::<ForClient>(QuicVersion::all_supported(), Timespec::new(0, 0));
-        let mut server_framer = QuicFramer::new::<ForClient>(QuicVersion::all_supported(), Timespec::new(0, 0));
-
-        client_framer.set_visitor(&framer_visitor);
-        server_framer.set_visitor(&framer_visitor);
+        let mut client_framer = QuicFramer::with_visitor::<ForClient>(
+            QuicVersion::all_supported(),
+            Timespec::new(0, 0),
+            &framer_visitor,
+        );
 
         let mut creator = QuicPacketCreator::new(2, &mut client_framer);
 
@@ -330,7 +352,29 @@ mod tests {
 
             let encrypted_packet = serialized_packet.as_encrypted_packet().unwrap();
 
-            server_framer.process_packet::<ForServer>(&encrypted_packet);
+            let framer_visitor = MockFramerVisitor::with_expected_events(vec![
+                OnPacket,
+                OnUnauthenticatedPublicHeader,
+                OnUnauthenticatedHeader,
+                OnDecryptedPacket(EncryptionLevel::None),
+                OnPacketHeader,
+                OnAckFrame,
+                OnStreamFrame,
+                OnStreamFrame,
+                OnPacketComplete,
+            ]);
+
+            let mut server_framer = QuicFramer::with_visitor::<ForClient>(
+                QuicVersion::all_supported(),
+                Timespec::new(0, 0),
+                &framer_visitor,
+            );
+
+            server_framer
+                .process_packet::<ForServer>(&encrypted_packet)
+                .unwrap();
+
+            framer_visitor.verify();
         }
     }
 }

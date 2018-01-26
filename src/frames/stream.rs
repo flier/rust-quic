@@ -80,7 +80,7 @@ impl<'a> WriteFrame<'a> for QuicStreamFrame<'a> {
         W: QuicFrameWriter<'a>,
         B: BufMut,
     {
-        self.write_to::<E, B>(writer.quic_version(), buf)
+        self.write_to::<E, B>(writer.quic_version(), !self.fin, buf)
     }
 }
 
@@ -137,7 +137,7 @@ impl<'a> QuicStreamFrame<'a> {
 
                             (Some(&remaining[..len]), &remaining[len..])
                         }
-                        None if !remaining.is_empty() => (Some(remaining), &b""[..]),
+                        None if fin => (Some(remaining), &b""[..]),
                         _ => (None, remaining),
                     };
 
@@ -172,7 +172,12 @@ impl<'a> QuicStreamFrame<'a> {
             .map_or(0, |data| mem::size_of::<u16>() + data.len())
     }
 
-    fn write_to<E, T>(&self, quic_version: QuicVersion, buf: &mut T) -> Result<usize, Error>
+    fn write_to<E, T>(
+        &self,
+        quic_version: QuicVersion,
+        no_stream_frame_length: bool,
+        buf: &mut T,
+    ) -> Result<usize, Error>
     where
         E: ByteOrder,
         T: BufMut,
@@ -241,7 +246,7 @@ impl<'a> QuicStreamFrame<'a> {
             buf.put_uint::<E>(self.offset, stream_offset_size);
         }
         // Data length
-        if quic_version <= QuicVersion::QUIC_VERSION_39 {
+        if !no_stream_frame_length && quic_version <= QuicVersion::QUIC_VERSION_39 {
             if let Some(data) = self.data {
                 buf.put_u16::<E>(data.len() as u16);
             }
@@ -264,14 +269,14 @@ named_args!(
             data_len_new: cond!(has_data_length && quic_version > QuicVersion::QUIC_VERSION_39,
                                 u16!(quic_version.endianness())) >>
             stream_id: uint!(quic_version.endianness(), stream_id_length) >>
-            offset: uint!(quic_version.endianness(), offset_length) >>
+            offset: cond!(offset_length > 0, uint!(quic_version.endianness(), offset_length)) >>
             data_len_pre40: cond!(has_data_length && quic_version <= QuicVersion::QUIC_VERSION_39,
                                   u16!(quic_version.endianness())) >>
             data_len: value!(data_len_new.or(data_len_pre40)) >>
         (
             (
                 stream_id as QuicStreamId,
-                offset as QuicStreamOffset,
+                offset.unwrap_or_default() as QuicStreamOffset,
                 data_len.map(|n| n as usize),
             )
         )

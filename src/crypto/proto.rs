@@ -30,6 +30,8 @@ pub const kC255: QuicTag = quic_tag!(b"C255");
 
 // AEAD algorithms
 
+/// NULL
+pub const kNULL: QuicTag = quic_tag!(b"NULL");
 /// AES128 + GCM-12
 pub const kAESG: QuicTag = quic_tag!(b"AESG");
 /// `ChaCha20` + `Poly1305` RFC7539

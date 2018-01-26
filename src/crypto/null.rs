@@ -8,12 +8,12 @@ use failure::{Error, Fail};
 use nom::{IResult, le_u32, le_u64};
 
 use constants::kMaxPacketSize;
-use crypto::{QuicDecrypter, QuicEncrypter};
+use crypto::{QuicDecrypter, QuicEncrypter, kNULL};
 use crypto::fnv::{fnv1a, kOffset};
 use errors::QuicError;
 use errors::QuicError::*;
 use proto::QuicPacketNumber;
-use types::{Perspective, QuicDiversificationNonce, QuicVersion};
+use types::{Perspective, QuicDiversificationNonce, QuicTag, QuicVersion};
 
 const kHashSizeShort: usize = 12; // size of uint128 serialized short
 
@@ -38,6 +38,10 @@ impl<P> QuicEncrypter for NullEncrypter<P>
 where
     P: Perspective,
 {
+    fn tag(&self) -> QuicTag {
+        kNULL
+    }
+
     fn encrypt_packet(
         &self,
         version: QuicVersion,
@@ -99,6 +103,10 @@ impl<P> QuicDecrypter for NullDecrypter<P>
 where
     P: 'static + Perspective,
 {
+    fn tag(&self) -> QuicTag {
+        kNULL
+    }
+
     fn with_preliminary_key(self, _nonce: &QuicDiversificationNonce) -> Box<QuicDecrypter> {
         Box::new(self)
     }

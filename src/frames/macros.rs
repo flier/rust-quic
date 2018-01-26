@@ -82,7 +82,10 @@ macro_rules! string_piece16 {
 macro_rules! uint (
     ($input:expr, $endianness:expr, $nbytes:expr) => (
         if $nbytes < 1 || $nbytes > 8 {
-            ::nom::IResult::Error(::nom::Err::Code(::nom::ErrorKind::Tag))
+            ::nom::IResult::Error(
+                ::nom::Err::Code(
+                    ::nom::ErrorKind::Custom(
+                        $crate::errors::ParseError::UIntSizeOutOfRange as u32)))
         } else if $input.len() < $nbytes {
             ::nom::IResult::Incomplete(::nom::Needed::Size($nbytes))
         } else {

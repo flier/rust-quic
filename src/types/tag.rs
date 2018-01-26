@@ -1,5 +1,6 @@
 use std::fmt;
 use std::iter;
+use std::mem;
 use std::slice;
 use std::str;
 use std::str::FromStr;
@@ -8,7 +9,7 @@ use byteorder::{ByteOrder, LittleEndian};
 use failure::Error;
 use nom::le_u32;
 
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Hash)]
 pub struct QuicTag(pub u32);
 
 impl QuicTag {
@@ -20,6 +21,10 @@ impl QuicTag {
             .collect::<Vec<u8>>();
 
         QuicTag(LittleEndian::read_u32(&bytes))
+    }
+
+    pub fn size() -> usize {
+        mem::size_of::<u32>()
     }
 
     pub fn as_bytes(&self) -> &[u8] {
@@ -54,6 +59,12 @@ impl FromStr for QuicTag {
 impl fmt::Display for QuicTag {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.as_str())
+    }
+}
+
+impl fmt::Debug for QuicTag {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "QuicTag({})", self.as_str())
     }
 }
 

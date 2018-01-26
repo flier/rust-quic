@@ -46,6 +46,8 @@ pub enum QuicError {
     #[fail(display = "underflow with first ack block length")] FirstAckBlockLengthOverflow,
 
     #[fail(display = "underflow with ack block length")] AckBlockLengthOverflow,
+
+    #[fail(display = "read uint size out of range")] UIntSizeOutOfRange,
 }
 
 impl<I> From<nom::IError<I>> for QuicError {
@@ -59,7 +61,7 @@ impl<I> From<nom::IError<I>> for QuicError {
 
 impl<P> From<nom::Err<P>> for QuicError {
     fn from(err: nom::Err<P>) -> Self {
-        QuicError::InvalidPacket(err.into_error_kind())
+        QuicError::from(err.into_error_kind())
     }
 }
 
@@ -75,6 +77,7 @@ impl From<nom::ErrorKind> for QuicError {
             nom::ErrorKind::Custom(code) => match ParseError::from_u32(code) {
                 Some(ParseError::FirstAckBlockLengthOverflow) => QuicError::FirstAckBlockLengthOverflow,
                 Some(ParseError::AckBlockLengthOverflow) => QuicError::AckBlockLengthOverflow,
+                Some(ParseError::UIntSizeOutOfRange) => QuicError::UIntSizeOutOfRange,
                 None => QuicError::InvalidPacket(err),
             },
             _ => QuicError::InvalidPacket(err),
@@ -87,6 +90,7 @@ impl From<nom::ErrorKind> for QuicError {
 pub enum ParseError {
     FirstAckBlockLengthOverflow,
     AckBlockLengthOverflow,
+    UIntSizeOutOfRange,
 }
 
 #[repr(u32)]
@@ -347,4 +351,18 @@ pub enum QuicErrorCode {
 
     /// No error. Used as bound while iterating.
     QUIC_LAST_ERROR = 98,
+}
+
+#[macro_export]
+macro_rules! hexdump {
+    ($data:expr) => {
+        hexdump!($data, offset => 0)
+    };
+    ($data:expr, offset => $offset:expr) => {
+        ::hexplay::HexViewBuilder::new($data)
+            .row_width(16)
+            .address_offset($offset)
+            .codepage(::hexplay::CODEPAGE_ASCII)
+            .finish()
+    }
 }
